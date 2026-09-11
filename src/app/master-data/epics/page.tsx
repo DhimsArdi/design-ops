@@ -1,0 +1,359 @@
+"use client"
+
+// Epics master data (PRD §18/§8.5): the initiative-level context a project
+// belongs to, scoped to exactly one Department. Never hard-deleted — the
+// only lifecycle action is Active/Inactive via epicRepository.setStatus.
+
+import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { Layers, MoreHorizontal, Plus, SearchX } from "lucide-react"
+import { PageHeader } from "@/components/shared/page-header"
+import { ContentSection } from "@/components/shared/content-section"
+import { EmptyState } from "@/components/shared/empty-state"
+import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
+import { SearchInput } from "@/components/shared/search-input"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import * as epicRepository from "@/lib/repositories/epicRepository"
+import * as departmentRepository from "@/lib/repositories/departmentRepository"
+import { activeOrSelected } from "@/lib/domain/optionHelpers"
+import type { Department, Epic } from "@/lib/domain/types"
+
+interface EpicFormState {
+  name: string
+  department_id: string
+  description: string
+}
+
+interface EpicFormErrors {
+  name?: string
+  department_id?: string
+}
+
+const EMPTY_FORM: EpicFormState = { name: "", department_id: "", description: "" }
+
+export default function EpicsPage() {
+  const [epics, setEpics] = useState<Epic[] | null>(null)
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [search, setSearch] = useState("")
+
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingEpic, setEditingEpic] = useState<Epic | null>(null)
+  const [form, setForm] = useState<EpicFormState>(EMPTY_FORM)
+  const [errors, setErrors] = useState<EpicFormErrors>({})
+
+  useEffect(() => {
+    // One-time bootstrap read of a synchronous, browser-only data source
+    // (localStorage via the repository layer), not a subscription.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDepartments(departmentRepository.getAll())
+    setEpics(epicRepository.getAll())
+  }, [])
+
+  function reloadEpics() {
+    setEpics(epicRepository.getAll())
+  }
+
+  const departmentById = useMemo(
+    () => new Map(departments.map((department) => [department.id, department])),
+    [departments]
+  )
+
+  const departmentOptions = useMemo(() => {
+    const currentId = editingEpic?.department_id
+    return activeOrSelected(departments, currentId ? [currentId] : [])
+  }, [departments, editingEpic])
+
+  const filteredEpics = useMemo(() => {
+    if (!epics) return []
+    const query = search.trim().toLowerCase()
+    if (!query) return epics
+    return epics.filter((epic) => {
+      const departmentName = departmentById.get(epic.department_id)?.name ?? ""
+      return (
+        epic.name.toLowerCase().includes(query) ||
+        departmentName.toLowerCase().includes(query)
+      )
+    })
+  }, [epics, search, departmentById])
+
+  function openCreateDialog() {
+    setEditingEpic(null)
+    setForm(EMPTY_FORM)
+    setErrors({})
+    setDialogOpen(true)
+  }
+
+  function openEditDialog(epic: Epic) {
+    setEditingEpic(epic)
+    setForm({
+      name: epic.name,
+      department_id: epic.department_id,
+      description: epic.description,
+    })
+    setErrors({})
+    setDialogOpen(true)
+  }
+
+  function toggleStatus(epic: Epic) {
+    epicRepository.setStatus(epic.id, epic.status === "Active" ? "Inactive" : "Active")
+    reloadEpics()
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const name = form.name.trim()
+    const nextErrors: EpicFormErrors = {}
+    if (!name) nextErrors.name = "Epic name is required."
+    if (!form.department_id) nextErrors.department_id = "Department is required."
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors)
+      return
+    }
+
+    if (editingEpic) {
+      epicRepository.update(editingEpic.id, {
+        name,
+        department_id: form.department_id,
+        description: form.description.trim(),
+      })
+    } else {
+      epicRepository.create({
+        name,
+        department_id: form.department_id,
+        description: form.description.trim(),
+        status: "Active",
+      })
+    }
+
+    setDialogOpen(false)
+    reloadEpics()
+  }
+
+  const hasEpics = (epics?.length ?? 0) > 0
+  const hasResults = filteredEpics.length > 0
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Epics"
+        description="The initiative-level context every project belongs to, scoped to one department."
+        actions={
+          <Button onClick={openCreateDialog}>
+            <Plus />
+            Add Epic
+          </Button>
+        }
+      />
+
+      <ContentSection
+        title={hasEpics ? `${filteredEpics.length} of ${epics?.length ?? 0} epics` : undefined}
+        bodyClassName="space-y-4"
+      >
+        {epics === null ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">Loading epics…</p>
+        ) : !hasEpics ? (
+          <EmptyState
+            icon={Layers}
+            title="No epics yet"
+            description="Add an epic to group projects under a business initiative and department."
+            action={
+              <Button onClick={openCreateDialog}>
+                <Plus />
+                Add Epic
+              </Button>
+            }
+          />
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <SearchInput
+                value={search}
+                onChange={setSearch}
+                placeholder="Search epics or departments…"
+                className="w-full sm:w-64"
+              />
+            </div>
+
+            {!hasResults ? (
+              <EmptyState
+                icon={SearchX}
+                title="No epics match your search"
+                description={`Nothing matches "${search}". Try a different name or department.`}
+                action={
+                  <Button variant="outline" onClick={() => setSearch("")}>
+                    Clear search
+                  </Button>
+                }
+              />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Epic Name</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="w-10">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredEpics.map((epic) => (
+                    <TableRow key={epic.id} className="hover:bg-transparent">
+                      <TableCell className="font-medium text-foreground">{epic.name}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {departmentById.get(epic.department_id)?.name ?? "–"}
+                      </TableCell>
+                      <TableCell>
+                        <EntityStatusBadge status={epic.status} />
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={<Button variant="ghost" size="icon-sm" />}
+                          >
+                            <MoreHorizontal />
+                            <span className="sr-only">Actions for {epic.name}</span>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEditDialog(epic)}>
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => toggleStatus(epic)}>
+                              {epic.status === "Active" ? "Deactivate" : "Activate"}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </>
+        )}
+      </ContentSection>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingEpic ? "Edit Epic" : "Add Epic"}</DialogTitle>
+            <DialogDescription>
+              {editingEpic
+                ? "Update this epic's name, department, or description."
+                : "Epics group related projects under one business initiative and department."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="space-y-4" onSubmit={handleSubmit} noValidate>
+            <div className="space-y-1.5">
+              <Label htmlFor="epic-name">Epic Name *</Label>
+              <Input
+                id="epic-name"
+                value={form.name}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setForm((current) => ({ ...current, name: value }))
+                  setErrors((current) => ({ ...current, name: undefined }))
+                }}
+                placeholder="e.g. Trade Finance"
+                aria-invalid={Boolean(errors.name)}
+                aria-describedby={errors.name ? "epic-name-error" : undefined}
+              />
+              {errors.name ? (
+                <p id="epic-name-error" className="text-xs text-destructive">
+                  {errors.name}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="epic-department">Department *</Label>
+              <Select
+                value={form.department_id}
+                onValueChange={(value) => {
+                  setForm((current) => ({ ...current, department_id: value ?? "" }))
+                  setErrors((current) => ({ ...current, department_id: undefined }))
+                }}
+              >
+                <SelectTrigger
+                  id="epic-department"
+                  className="w-full"
+                  aria-invalid={Boolean(errors.department_id)}
+                  aria-describedby={errors.department_id ? "epic-department-error" : undefined}
+                >
+                  <SelectValue placeholder="Select a department" />
+                </SelectTrigger>
+                <SelectContent>
+                  {departmentOptions.map((department) => (
+                    <SelectItem key={department.id} value={department.id}>
+                      {department.name}
+                      {department.status === "Inactive" ? " (Inactive)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.department_id ? (
+                <p id="epic-department-error" className="text-xs text-destructive">
+                  {errors.department_id}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="epic-description">Description</Label>
+              <Textarea
+                id="epic-description"
+                value={form.description}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setForm((current) => ({ ...current, description: value }))
+                }}
+                placeholder="Optional context for this epic"
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">{editingEpic ? "Save Changes" : "Add Epic"}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
