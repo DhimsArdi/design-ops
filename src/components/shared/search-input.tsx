@@ -4,6 +4,7 @@
 // clear. Kept fully controlled and generic — no debouncing, filtering, or
 // entity-specific logic lives here, that stays with each page's own state.
 
+import type { Ref } from "react"
 import { Search, X } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -14,13 +15,15 @@ interface SearchInputProps {
   onChange: (value: string) => void
   placeholder?: string
   className?: string
+  ref?: Ref<HTMLInputElement>
 }
 
-function SearchInput({ value, onChange, placeholder = "Search…", className }: SearchInputProps) {
+function SearchInput({ value, onChange, placeholder = "Search…", className, ref }: SearchInputProps) {
   return (
     <div className={cn("relative", className)}>
       <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
+        ref={ref}
         type="text"
         value={value}
         onChange={(event) => onChange(event.target.value)}

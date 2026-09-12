@@ -3,7 +3,9 @@
 // docs/DECISIONS.md "No hard delete anywhere"). Distinct from StatusBadge,
 // which renders Project's five-value ProjectStatus enum — do not conflate
 // the two. Inactive is a normal, expected lifecycle state (not an error), so
-// it stays a plain neutral outline rather than a saturated red.
+// it stays a plain neutral outline rather than a saturated red. "Active"
+// shares the same --status-success token as StatusBadge/HealthBadge rather
+// than its own hardcoded color (docs/DECISIONS.md).
 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "cn"
@@ -22,7 +24,7 @@ function EntityStatusBadge({ status, className }: EntityStatusBadgeProps) {
       variant="outline"
       className={cn(
         isActive
-          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+          ? "border-transparent bg-status-success/10 text-status-success"
           : "border-border text-muted-foreground",
         className
       )}

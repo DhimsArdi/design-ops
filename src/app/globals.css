@@ -9,19 +9,9 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
-  --color-ink-navy: var(--ink-navy);
-  --color-signal-blue: var(--signal-blue);
-  --color-slate-gray: var(--slate-gray);
-  --color-mist-gray: var(--mist-gray);
-  --color-cloud: var(--cloud);
-  --color-paper: var(--paper);
-  --color-pebble: var(--pebble);
-  --color-pebble-blue: var(--pebble-blue);
-  --color-hairline: var(--hairline);
-  --color-deep-cobalt: var(--deep-cobalt);
-  --color-sky-cyan: var(--sky-cyan);
-  --color-coral-magenta: var(--coral-magenta);
+  --font-heading: var(--font-geist-sans);
+  --color-status-warning: var(--status-warning);
+  --color-status-success: var(--status-success);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -61,86 +51,123 @@
 }
 
 :root {
-  /* Brand primitives (docs/DESIGN.md) — theme-invariant source hues. */
-  --ink-navy: #0b3558;
-  --signal-blue: #006bff;
-  --slate-gray: #476788;
-  --mist-gray: #a6bbd1;
-  --cloud: #f8f9fb;
-  --paper: #ffffff;
-  --pebble: #f0f3f8;
-  --pebble-blue: #e6f0ff;
-  --hairline: #d4e0ed;
-  --deep-cobalt: #004eba;
-  --sky-cyan: #0099ff;
-  --coral-magenta: #e55cff;
-
-  --background: var(--cloud);
-  --foreground: var(--ink-navy);
-  --card: var(--paper);
-  --card-foreground: var(--ink-navy);
-  --popover: var(--paper);
-  --popover-foreground: var(--ink-navy);
-  --primary: var(--signal-blue);
-  --primary-foreground: var(--paper);
-  --secondary: var(--pebble);
-  --secondary-foreground: var(--ink-navy);
-  --muted: var(--pebble);
-  --muted-foreground: var(--slate-gray);
-  --accent: var(--pebble-blue);
-  --accent-foreground: var(--deep-cobalt);
+  /* Shared status-color tokens (docs/DECISIONS.md) — every status/health
+     badge reads from these instead of hardcoding a Tailwind color scale, so
+     a future theme/preset change only ever touches this file. */
+  --status-warning: #b45309;
+  --status-success: #047857;
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.511 0.096 186.391);
+  --primary-foreground: oklch(0.984 0.014 180.72);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.511 0.096 186.391);
+  --accent-foreground: oklch(0.984 0.014 180.72);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: var(--hairline);
-  --input: var(--hairline);
-  --ring: var(--signal-blue);
-  --chart-1: var(--signal-blue);
-  --chart-2: var(--sky-cyan);
-  --chart-3: var(--deep-cobalt);
-  --chart-4: var(--slate-gray);
-  --chart-5: var(--coral-magenta);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+  --chart-1: oklch(0.871 0.006 286.286);
+  --chart-2: oklch(0.552 0.016 285.938);
+  --chart-3: oklch(0.442 0.017 285.786);
+  --chart-4: oklch(0.37 0.013 285.805);
+  --chart-5: oklch(0.274 0.006 286.033);
   --radius: 0.625rem;
-  --sidebar: var(--paper);
-  --sidebar-foreground: var(--ink-navy);
-  --sidebar-primary: var(--signal-blue);
-  --sidebar-primary-foreground: var(--paper);
-  --sidebar-accent: var(--pebble-blue);
-  --sidebar-accent-foreground: var(--deep-cobalt);
-  --sidebar-border: var(--hairline);
-  --sidebar-ring: var(--signal-blue);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-primary: oklch(0.6 0.118 184.704);
+  --sidebar-primary-foreground: oklch(0.984 0.014 180.72);
+  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-ring: oklch(0.705 0.015 286.067);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
 }
 
 .dark {
-  --background: #0b1420;
-  --foreground: #eaf1fa;
-  --card: #101d2c;
-  --card-foreground: #eaf1fa;
-  --popover: #101d2c;
-  --popover-foreground: #eaf1fa;
-  --primary: #3d9bff;
-  --primary-foreground: #06233c;
-  --secondary: #16232f;
-  --secondary-foreground: #d7e4f2;
-  --muted: #16232f;
-  --muted-foreground: #93add0;
-  --accent: #142943;
-  --accent-foreground: #8ec4ff;
+  --status-warning: #fbbf24;
+  --status-success: #34d399;
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.437 0.078 188.216);
+  --primary-foreground: oklch(0.984 0.014 180.72);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.437 0.078 188.216);
+  --accent-foreground: oklch(0.984 0.014 180.72);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: rgba(166, 187, 209, 0.18);
-  --input: rgba(166, 187, 209, 0.22);
-  --ring: #3d9bff;
-  --chart-1: #3d9bff;
-  --chart-2: #2ec2ff;
-  --chart-3: #6fa8ff;
-  --chart-4: #93add0;
-  --chart-5: #ff8bf5;
-  --sidebar: #0d1826;
-  --sidebar-foreground: #eaf1fa;
-  --sidebar-primary: #3d9bff;
-  --sidebar-primary-foreground: #06233c;
-  --sidebar-accent: #142943;
-  --sidebar-accent-foreground: #8ec4ff;
-  --sidebar-border: rgba(166, 187, 209, 0.18);
-  --sidebar-ring: #3d9bff;
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+  --chart-1: oklch(0.871 0.006 286.286);
+  --chart-2: oklch(0.552 0.016 285.938);
+  --chart-3: oklch(0.442 0.017 285.786);
+  --chart-4: oklch(0.37 0.013 285.805);
+  --chart-5: oklch(0.274 0.006 286.033);
+  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.704 0.14 182.503);
+  --sidebar-primary-foreground: oklch(0.277 0.046 192.524);
+  --sidebar-accent: oklch(0.274 0.006 286.033);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.552 0.016 285.938);
+}
+
+/* Motion tokens — transitions.dev scale (see .claude/skills/transitions-polish).
+   Pick a token by what the motion DOES, not by the nearest number.
+   --ease-out / --ease-in-out / --ease-linear are intentionally absent: Tailwind
+   already owns those names, so use its native ease-* utilities for them. */
+:root {
+  --duration-stagger: 40ms; /* per-item stagger offset */
+  --duration-micro: 80ms; /* tooltip/path delay, shake segment */
+  --duration-quick: 150ms; /* modal/dropdown close, text swap, tooltip appear */
+  --duration-fast: 250ms; /* icon swap, dropdown/modal open, tabs, page slide */
+  --duration-medium: 350ms; /* panel close, toast close */
+  --duration-slow: 400ms; /* panel open, skeleton reveal, input clear */
+  --duration-very-slow: 500ms; /* emphasis moments, badge appear, success check */
+
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1); /* open/close, slide, resize */
+  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1); /* badge pop open */
+  --ease-bounce-strong: cubic-bezier(0.34, 3.85, 0.64, 1); /* bouncy hover-out */
+
+  --distance-micro: 4px; /* text swap */
+  --distance-small: 6px; /* error shake (small segment) */
+  --distance-base: 8px; /* badge reveal, page slide, error shake (large) */
+  --distance-medium: 12px; /* text reveal */
+  --distance-large: 30px; /* check badge appear */
+
+  --scale-large: 0.96; /* modal open / close */
+  --scale-medium: 0.97; /* dropdown open */
+  --scale-small: 0.98; /* tooltip open */
+  --scale-tiny: 0.99; /* dropdown close */
+
+  --blur-small: 2px; /* panel reveal, icon swap, text swap, skeleton reveal */
+  --blur-medium: 3px; /* page slide, text reveal */
+  --blur-large: 8px; /* success check open */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer base {

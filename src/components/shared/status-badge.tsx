@@ -1,20 +1,23 @@
 // Compact badge for Project Status (PRD §10, §31). Restrained color use:
 // the label text always carries the meaning: color is reinforcement, never
-// the sole signal. Reuses the base Badge's neutral variants for the two
-// "quiet" bookend states (Proposed, Done) instead of inventing new styling
-// for them.
+// the sole signal. Every color comes from the shared semantic status tokens
+// in globals.css (--primary for the "active" family, --status-warning,
+// --status-success) rather than a hardcoded Tailwind color scale, so a
+// future theme change only ever touches that one file (docs/DECISIONS.md).
+// Proposed is the one quiet bookend state, left on Badge's neutral "outline".
 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "cn"
 import type { ProjectStatus } from "@/lib/domain/enums"
 
-// Only the three "in-motion" statuses need custom color — Proposed and Done
-// map directly onto Badge's existing outline/secondary variants below.
+// Planning and In Progress are one "active / in-motion" family (both derived
+// from --primary) — Planning soft/lighter, In Progress strong/solid — so
+// they read as related but stay visually distinguishable at a glance.
 const STATUS_CLASSNAME: Partial<Record<ProjectStatus, string>> = {
-  Planning: "border-hairline bg-pebble-blue text-deep-cobalt dark:border-transparent",
+  Planning: "border-transparent bg-primary/10 text-primary",
   "In Progress": "border-transparent bg-primary text-primary-foreground",
-  "On Hold":
-    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+  "On Hold": "border-transparent bg-status-warning/10 text-status-warning",
+  Done: "border-transparent bg-status-success/10 text-status-success",
 }
 
 interface StatusBadgeProps {
@@ -23,10 +26,8 @@ interface StatusBadgeProps {
 }
 
 function StatusBadge({ status, className }: StatusBadgeProps) {
-  const variant = status === "Proposed" ? "outline" : status === "Done" ? "secondary" : "outline"
-
   return (
-    <Badge variant={variant} className={cn(STATUS_CLASSNAME[status], className)}>
+    <Badge variant="outline" className={cn(STATUS_CLASSNAME[status], className)}>
       {status}
     </Badge>
   )

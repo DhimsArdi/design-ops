@@ -20,21 +20,11 @@ import { ArrowDown, ArrowUp, FolderKanban, Plus, SearchX } from "lucide-react"
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
 import { EmptyState } from "@/components/shared/empty-state"
-import { SearchInput } from "@/components/shared/search-input"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { PriorityBadge } from "@/components/shared/priority-badge"
 import { HealthBadge } from "@/components/shared/health-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import {
   Table,
   TableBody,
@@ -44,14 +34,23 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
+import {
+  ProjectsFilterBar,
+  DEFAULT_FILTERS,
+  currentMonthKey,
+  getProjectTimelineBucket,
+  type ProjectFilters,
+} from "./_components/projects-filter-bar"
+
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
 import { useRepositoryList } from "@/lib/hooks/use-repository-list"
 import * as projectRepository from "@/lib/repositories/projectRepository"
 import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as departmentRepository from "@/lib/repositories/departmentRepository"
 import * as epicRepository from "@/lib/repositories/epicRepository"
+import * as designerRepository from "@/lib/repositories/designerRepository"
 import { getProjectLead } from "@/lib/selectors/projectSelectors"
-import { PRIORITIES, PROJECT_HEALTHS, PROJECT_STATUSES } from "@/lib/domain/enums"
-import type { Priority, ProjectHealth, ProjectStatus } from "@/lib/domain/enums"
+import { PRIORITIES } from "@/lib/domain/enums"
 import type { Project } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
 
@@ -72,19 +71,6 @@ function formatTimeline(project: Project): string {
   return `${formatMonth(project.start_month)} – ${formatMonth(project.end_month)}`
 }
 
-// Every filter is a plain "all" | <value> union kept in component state (no
-// URL query-param sync — nothing links into this page with a preset filter
-// yet, and every other list page in this app follows the same plain-state
-// pattern). If a later phase needs deep-linking, these are the state shapes
-// and "all" sentinel to mirror as query params: squad/department/epic by id,
-// priority/status/health by their exact enum string, showArchived boolean.
-type SquadFilter = "all" | string
-type DepartmentFilter = "all" | string
-type EpicFilter = "all" | string
-type PriorityFilter = "all" | Priority
-type StatusFilter = "all" | ProjectStatus
-type HealthFilter = "all" | ProjectHealth
-
 type SortKey = "priority" | "timeline"
 type SortDirection = "asc" | "desc"
 
@@ -94,15 +80,10 @@ export default function ProjectsPage() {
   const [squads] = useRepositoryList(squadRepository)
   const [departments] = useRepositoryList(departmentRepository)
   const [epics] = useRepositoryList(epicRepository)
+  const [designers] = useRepositoryList(designerRepository)
 
-  const [search, setSearch] = useState("")
-  const [squadFilter, setSquadFilter] = useState<SquadFilter>("all")
-  const [departmentFilter, setDepartmentFilter] = useState<DepartmentFilter>("all")
-  const [epicFilter, setEpicFilter] = useState<EpicFilter>("all")
-  const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>("all")
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
-  const [healthFilter, setHealthFilter] = useState<HealthFilter>("all")
-  const [showArchived, setShowArchived] = useState(false)
+  const [filters, setFilters] = useState<ProjectFilters>(DEFAULT_FILTERS)
+  const debouncedSearch = useDebouncedValue(filters.search, 250)
 
   const [sortKey, setSortKey] = useState<SortKey>("priority")
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
@@ -115,29 +96,76 @@ export default function ProjectsPage() {
   const epicsById = useMemo(() => new Map(epics.map((epic) => [epic.id, epic])), [epics])
 
   const squadOptions = useMemo(
-    () => [...squads].sort((a, b) => a.name.localeCompare(b.name)),
+    () => [...squads].sort((a, b) => a.name.localeCompare(b.name)).map((squad) => ({ value: squad.id, label: squad.name })),
     [squads]
   )
   const departmentOptions = useMemo(
-    () => [...departments].sort((a, b) => a.name.localeCompare(b.name)),
+    () =>
+      [...departments]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((department) => ({ value: department.id, label: department.name })),
     [departments]
   )
-  const epicOptions = useMemo(() => [...epics].sort((a, b) => a.name.localeCompare(b.name)), [epics])
+  const epicOptions = useMemo(
+    () => [...epics].sort((a, b) => a.name.localeCompare(b.name)).map((epic) => ({ value: epic.id, label: epic.name })),
+    [epics]
+  )
+  const designerOptions = useMemo(
+    () =>
+      [...designers]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((designer) => ({ value: designer.id, label: designer.name })),
+    [designers]
+  )
+
+  const leadsByProjectId = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof getProjectLead>>()
+    for (const project of projects) {
+      map.set(project.id, getProjectLead(project.id))
+    }
+    return map
+  }, [projects])
+
+  function patchFilters(patch: Partial<ProjectFilters>) {
+    setFilters((prev) => ({ ...prev, ...patch }))
+  }
 
   const visibleProjects = useMemo(() => {
-    const trimmedQuery = search.trim().toLowerCase()
+    const trimmedQuery = debouncedSearch.trim().toLowerCase()
+    const todayKey = currentMonthKey()
 
     const filtered = projects.filter((project) => {
-      if (!showArchived && project.is_archived) return false
+      if (!filters.showArchived && project.is_archived) return false
+
       const statusMatches =
-        statusFilter === "all" ? project.status !== "Done" : project.status === statusFilter
+        filters.status.length === 0 ? project.status !== "Done" : filters.status.includes(project.status)
       if (!statusMatches) return false
-      if (priorityFilter !== "all" && project.priority !== priorityFilter) return false
-      if (healthFilter !== "all" && project.health !== healthFilter) return false
-      if (squadFilter !== "all" && project.owner_squad_id !== squadFilter) return false
-      if (departmentFilter !== "all" && project.department_id !== departmentFilter) return false
-      if (epicFilter !== "all" && project.epic_id !== epicFilter) return false
-      if (trimmedQuery && !project.name.toLowerCase().includes(trimmedQuery)) return false
+
+      if (filters.priority.length > 0 && !filters.priority.includes(project.priority)) return false
+      if (filters.health !== "all" && project.health !== filters.health) return false
+      if (filters.squad !== "all" && project.owner_squad_id !== filters.squad) return false
+      if (filters.department !== "all" && project.department_id !== filters.department) return false
+      if (filters.epic !== "all" && project.epic_id !== filters.epic) return false
+      if (filters.timeline !== "all" && getProjectTimelineBucket(project, todayKey) !== filters.timeline) {
+        return false
+      }
+
+      const lead = leadsByProjectId.get(project.id)
+      if (filters.designLead !== "all" && lead?.id !== filters.designLead) return false
+
+      if (trimmedQuery) {
+        const epic = epicsById.get(project.epic_id)
+        const department = departmentsById.get(project.department_id)
+        const squad = squadsById.get(project.owner_squad_id)
+        const matchesSearch =
+          project.name.toLowerCase().includes(trimmedQuery) ||
+          Boolean(epic?.name.toLowerCase().includes(trimmedQuery)) ||
+          Boolean(department?.name.toLowerCase().includes(trimmedQuery)) ||
+          Boolean(squad?.name.toLowerCase().includes(trimmedQuery)) ||
+          Boolean(lead?.name.toLowerCase().includes(trimmedQuery))
+        if (!matchesSearch) return false
+      }
+
       return true
     })
 
@@ -154,14 +182,12 @@ export default function ProjectsPage() {
     return sorted
   }, [
     projects,
-    search,
-    showArchived,
-    statusFilter,
-    priorityFilter,
-    healthFilter,
-    squadFilter,
-    departmentFilter,
-    epicFilter,
+    debouncedSearch,
+    filters,
+    leadsByProjectId,
+    epicsById,
+    departmentsById,
+    squadsById,
     sortKey,
     sortDirection,
   ])
@@ -185,27 +211,22 @@ export default function ProjectsPage() {
   }
 
   function clearFilters() {
-    setSearch("")
-    setSquadFilter("all")
-    setDepartmentFilter("all")
-    setEpicFilter("all")
-    setPriorityFilter("all")
-    setStatusFilter("all")
-    setHealthFilter("all")
-    setShowArchived(false)
+    setFilters(DEFAULT_FILTERS)
   }
 
   const hasAnyProjects = projects.length > 0
   const hasResults = visibleProjects.length > 0
   const hasFiltersApplied =
-    search.trim() !== "" ||
-    squadFilter !== "all" ||
-    departmentFilter !== "all" ||
-    epicFilter !== "all" ||
-    priorityFilter !== "all" ||
-    statusFilter !== "all" ||
-    healthFilter !== "all" ||
-    showArchived
+    filters.search.trim() !== "" ||
+    filters.status.length > 0 ||
+    filters.priority.length > 0 ||
+    filters.department !== "all" ||
+    filters.epic !== "all" ||
+    filters.squad !== "all" ||
+    filters.designLead !== "all" ||
+    filters.health !== "all" ||
+    filters.timeline !== "all" ||
+    filters.showArchived
 
   return (
     <div className="space-y-6">
@@ -220,150 +241,50 @@ export default function ProjectsPage() {
         }
       />
 
-      <ContentSection bodyClassName="space-y-4">
+      <ContentSection bodyClassName="p-0">
         {!hasAnyProjects ? (
-          <EmptyState
-            icon={FolderKanban}
-            title="No projects found"
-            description="Create your first project to start building the portfolio."
-            action={
-              <Button render={<Link href="/projects/new" />} nativeButton={false}>
-                <Plus />
-                Add Project
-              </Button>
-            }
-          />
+          <div className="p-5">
+            <EmptyState
+              icon={FolderKanban}
+              title="No projects found"
+              description="Create your first project to start building the portfolio."
+              action={
+                <Button render={<Link href="/projects/new" />} nativeButton={false}>
+                  <Plus />
+                  Add Project
+                </Button>
+              }
+            />
+          </div>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <SearchInput
-                value={search}
-                onChange={setSearch}
-                placeholder="Search projects…"
-                className="w-full sm:w-56"
-              />
-
-              <Select value={squadFilter} onValueChange={(value) => setSquadFilter(value ?? "all")}>
-                <SelectTrigger className="w-40" aria-label="Filter by owner squad">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All squads</SelectItem>
-                  {squadOptions.map((squad) => (
-                    <SelectItem key={squad.id} value={squad.id}>
-                      {squad.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select
-                value={priorityFilter}
-                onValueChange={(value) => setPriorityFilter(value ?? "all")}
-              >
-                <SelectTrigger className="w-32" aria-label="Filter by priority">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All priorities</SelectItem>
-                  {PRIORITIES.map((priority) => (
-                    <SelectItem key={priority} value={priority}>
-                      {priority}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select
-                value={statusFilter}
-                onValueChange={(value) => setStatusFilter(value ?? "all")}
-              >
-                <SelectTrigger className="w-36" aria-label="Filter by status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  {PROJECT_STATUSES.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {status}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select
-                value={departmentFilter}
-                onValueChange={(value) => setDepartmentFilter(value ?? "all")}
-              >
-                <SelectTrigger className="w-44" aria-label="Filter by department">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All departments</SelectItem>
-                  {departmentOptions.map((department) => (
-                    <SelectItem key={department.id} value={department.id}>
-                      {department.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={epicFilter} onValueChange={(value) => setEpicFilter(value ?? "all")}>
-                <SelectTrigger className="w-40" aria-label="Filter by epic">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All epics</SelectItem>
-                  {epicOptions.map((epic) => (
-                    <SelectItem key={epic.id} value={epic.id}>
-                      {epic.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select
-                value={healthFilter}
-                onValueChange={(value) => setHealthFilter(value ?? "all")}
-              >
-                <SelectTrigger className="w-32" aria-label="Filter by health">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All health</SelectItem>
-                  {PROJECT_HEALTHS.map((health) => (
-                    <SelectItem key={health} value={health}>
-                      {health}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Label className="pl-1">
-                <Switch checked={showArchived} onCheckedChange={setShowArchived} />
-                Show archived
-              </Label>
-
-              {hasFiltersApplied ? (
-                <Button variant="ghost" size="sm" onClick={clearFilters}>
-                  Clear filters
-                </Button>
-              ) : null}
-            </div>
+            <ProjectsFilterBar
+              filters={filters}
+              onFiltersChange={patchFilters}
+              onClearAll={clearFilters}
+              hasFiltersApplied={hasFiltersApplied}
+              departmentOptions={departmentOptions}
+              epicOptions={epicOptions}
+              squadOptions={squadOptions}
+              designerOptions={designerOptions}
+            />
 
             {!hasResults ? (
-              <EmptyState
-                icon={SearchX}
-                title="No projects match these filters"
-                action={
-                  <Button variant="outline" onClick={clearFilters}>
-                    Clear filters
-                  </Button>
-                }
-              />
+              <div className="border-t border-border p-5">
+                <EmptyState
+                  icon={SearchX}
+                  title="No projects match these filters."
+                  action={
+                    <Button variant="outline" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  }
+                />
+              </div>
             ) : (
-              <Table>
-                <TableHeader>
+              <div className="border-t border-border px-4 py-4">
+                <Table>
+                  <TableHeader>
                   <TableRow>
                     <TableHead>Project</TableHead>
                     <TableHead>Epic</TableHead>
@@ -415,7 +336,7 @@ export default function ProjectsPage() {
                     const epic = epicsById.get(project.epic_id)
                     const department = departmentsById.get(project.department_id)
                     const squad = squadsById.get(project.owner_squad_id)
-                    const lead = getProjectLead(project.id)
+                    const lead = leadsByProjectId.get(project.id)
 
                     return (
                       <TableRow
@@ -464,7 +385,8 @@ export default function ProjectsPage() {
                     )
                   })}
                 </TableBody>
-              </Table>
+                </Table>
+              </div>
             )}
           </>
         )}

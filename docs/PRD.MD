@@ -998,6 +998,35 @@ Filter
 Sort
 ```
 
+### Filters
+
+A compact toolbar sits directly above the table (no large standalone filter card):
+
+```text
+Search   Status   Priority   Department   Filters
+```
+
+Search matches project name, Epic, Department, Owner Squad, and Design Lead. Status, Priority, and Department are quick filters and apply immediately; Status and Priority are multi-select (e.g. Planning + In Progress at once).
+
+"Filters" opens an Advanced Filters panel for the remaining, less-frequently-changed fields:
+
+```text
+Epic
+Owner Squad
+Design Lead
+Timeline
+Health
+Show archived projects
+```
+
+These are staged — changes take effect on "Apply" (or are cleared immediately by "Reset"), not as each field is touched. Owner Squad and Design Lead are searchable.
+
+**Timeline** buckets a project's Start/End month against the current month: `Active now` (current month falls within the range), `Upcoming` (starts later), `Past` (already ended). See `docs/DECISIONS.md` for why this is a simple bucket rather than a full date-range picker.
+
+At narrower widths, Department (then Priority and Status) drop from the toolbar in favor of the Filters panel, which always additionally exposes Status/Priority/Department so they stay reachable — see `docs/DECISIONS.md`. The toolbar never wraps into multiple rows.
+
+Active filters (beyond Search) show as a row of small removable tokens directly under the toolbar, with a "Clear all" action; the row is absent entirely when no filter is active.
+
 ### Default sort
 
 Recommended:
@@ -1897,7 +1926,7 @@ Consistent spacing
 Strong typography hierarchy
 ```
 
-Color palette (see `docs/DESIGN.md`): the app uses a defined navy/blue brand palette rather than pure grayscale — Ink Navy (#0b3558) for text and icons, Signal Blue (#006bff) as the single primary action/focus/selection color, Slate Gray (#476788) for secondary text, and a Cloud/Paper/Pebble neutral surface scale. This still honors the Avoid list below (no gradients, no neon, no decorative color) — it replaces "grayscale" with "one disciplined brand hue," not with a colorful/maximalist palette.
+Color palette: the app's shadcn theme is generated from a published shadcn preset (`shadcn init --preset b3YQijUO6K`, style `base-vega`, base color `zinc`) — a single teal/zinc accent hue for `--primary`/`--accent`/focus states over neutral zinc surfaces, still honoring the Avoid list below (no gradients, no neon, no decorative color). The earlier Ink Navy/Signal Blue brand primitives (from an interim `docs/DESIGN.md`-driven palette) have been fully removed — no component still references them. All status/health color (Project Status, Project Health, Master Data Active/Inactive) is driven by a small set of shared semantic tokens (`--primary` for the "active/in-motion" family, `--status-warning`, `--status-success`, `--destructive`) defined once in `src/app/globals.css`, never hardcoded per component — see `docs/DECISIONS.md`.
 
 Recommended components:
 
@@ -1905,13 +1934,9 @@ Recommended components:
 shadcn/ui
 ```
 
-Typography:
+Icon library: shadcn's own primitives (Button, Dialog, etc.) use Hugeicons per the preset; existing app code continues to use lucide-react directly — both packages are present, not a full migration.
 
-```text
-Inter
-or
-Jakarta Sans
-```
+Typography: Geist is the product's single font family — headings, body text, labels, tables, buttons, forms, and navigation all use it (one font load, no mixed-font pairing). Consistent with the PRD's original "Inter or Plus Jakarta Sans" direction (Geist is the same geometric-sans family).
 
 Desktop-first target:
 

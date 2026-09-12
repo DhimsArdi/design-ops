@@ -4,6 +4,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/shell/AppShell";
 import "./globals.css";
 
+// Geist is the product's single font family (headings, body, labels,
+// tables, buttons, forms, navigation) — one font load, no mixed-font
+// pairing. --font-sans and --font-heading both alias to it in
+// globals.css rather than loading Geist a second time under a different
+// variable name. Geist Mono is kept only for tabular/monospace data.
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],

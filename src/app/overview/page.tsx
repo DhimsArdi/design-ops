@@ -277,7 +277,7 @@ export default function OverviewPage() {
                 <span
                   className={cn(
                     "w-28 shrink-0 text-sm",
-                    lead ? "text-muted-foreground" : "font-medium text-amber-700 dark:text-amber-400"
+                    lead ? "text-muted-foreground" : "font-medium text-status-warning"
                   )}
                 >
                   {lead?.name ?? "Unassigned"}
@@ -309,7 +309,7 @@ export default function OverviewPage() {
                   </span>
                   <span className="text-sm text-muted-foreground">{squad?.name ?? "–"}</span>
                   {!lead ? (
-                    <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                    <span className="text-xs font-medium text-status-warning">
                       Design Lead not assigned
                     </span>
                   ) : null}
@@ -403,7 +403,7 @@ function Stat({ label, value, emphasize }: StatProps) {
       <p
         className={cn(
           "text-2xl font-semibold tabular-nums",
-          emphasize ? "text-amber-700 dark:text-amber-400" : "text-foreground"
+          emphasize ? "text-status-warning" : "text-foreground"
         )}
       >
         {value}

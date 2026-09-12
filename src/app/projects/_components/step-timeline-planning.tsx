@@ -179,7 +179,7 @@ function StepTimelinePlanning({
       {rangeError ? <p className="text-sm text-destructive">{rangeError}</p> : null}
 
       {pending ? (
-        <div className="flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+        <div className="flex flex-col gap-3 rounded-md border border-status-warning/30 bg-status-warning/10 p-3 text-sm text-status-warning">
           <div className="flex gap-2">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
             <p>
