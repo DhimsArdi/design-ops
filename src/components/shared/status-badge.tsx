@@ -7,6 +7,7 @@
 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "cn"
+import { PROJECT_STATUS_LABELS } from "@/lib/domain/enums"
 import type { ProjectStatus } from "@/lib/domain/enums"
 
 // Planning and In Progress are one "active / in-motion" family (both derived
@@ -30,7 +31,7 @@ interface StatusBadgeProps {
 function StatusBadge({ status, className }: StatusBadgeProps) {
   return (
     <Badge variant="outline" className={cn(STATUS_CLASSNAME[status], className)}>
-      {status}
+      {PROJECT_STATUS_LABELS[status]}
     </Badge>
   )
 }

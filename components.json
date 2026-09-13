@@ -23,6 +23,7 @@
   "menuAccent": "bold",
   "registries": {
     "@reui": "https://reui.io/r/{style}/{name}.json",
-    "@kobra": "https://kobra.systems/r/{name}.json"
+    "@kobra": "https://kobra.systems/r/{name}.json",
+    "@beui": "https://beui.dev/r/{name}.json"
   }
 }

@@ -35,14 +35,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table } from "@/components/motion/table"
+import type { TableColumn } from "@/components/motion/table"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -195,6 +189,64 @@ export default function DepartmentsPage() {
   const isLoading = departments === null
   const hasAnyDepartments = (departments?.length ?? 0) > 0
 
+  const columns = useMemo<TableColumn<Department>[]>(
+    () => [
+      {
+        key: "name",
+        header: "Department Name",
+        sortable: true,
+        cell: (department) => (
+          <span className="font-medium text-foreground">{department.name}</span>
+        ),
+      },
+      {
+        key: "head",
+        header: "Department Head",
+        cell: (department) => {
+          const head = department.department_head_id
+            ? stakeholderById.get(department.department_head_id)
+            : undefined
+          return <span className="text-muted-foreground">{head ? head.name : "–"}</span>
+        },
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (department) => <EntityStatusBadge status={department.status} />,
+      },
+      {
+        key: "actions",
+        header: <span className="sr-only">Actions</span>,
+        width: "56px",
+        align: "right",
+        cell: (department) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
+              <MoreHorizontal />
+              <span className="sr-only">Actions for {department.name}</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => openEditDialog(department)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toggleStatus(department)}>
+                {department.status === "Active" ? "Deactivate" : "Activate"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => setDeletingDepartment(department)}
+              >
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+      },
+    ],
+    [stakeholderById, toggleStatus]
+  )
+
+  const tableHeight = Math.min(560, (filteredDepartments.length + 1) * 48)
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -246,63 +298,13 @@ export default function DepartmentsPage() {
                 }
               />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Department Name</TableHead>
-                    <TableHead>Department Head</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-10">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredDepartments.map((department) => {
-                    const head = department.department_head_id
-                      ? stakeholderById.get(department.department_head_id)
-                      : undefined
-                    return (
-                      <TableRow key={department.id} className="hover:bg-transparent">
-                        <TableCell className="font-medium text-foreground">
-                          {department.name}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {head ? head.name : "–"}
-                        </TableCell>
-                        <TableCell>
-                          <EntityStatusBadge status={department.status} />
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              render={<Button variant="ghost" size="icon-sm" />}
-                            >
-                              <MoreHorizontal />
-                              <span className="sr-only">Actions for {department.name}</span>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => openEditDialog(department)}>
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => toggleStatus(department)}>
-                                {department.status === "Active" ? "Deactivate" : "Activate"}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                variant="destructive"
-                                onClick={() => setDeletingDepartment(department)}
-                              >
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+              <Table
+                data={filteredDepartments}
+                columns={columns}
+                getRowId={(department) => department.id}
+                defaultSort={{ key: "name", direction: "asc" }}
+                height={tableHeight}
+              />
             )}
           </>
         )}

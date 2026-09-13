@@ -8,7 +8,7 @@
 
 import { useCallback, useMemo, useState, type FormEvent } from "react"
 import { toast } from "sonner"
-import { ArrowDown, ArrowUp, MoreHorizontal, Plus, SearchX, Users } from "lucide-react"
+import { MoreHorizontal, Plus, SearchX, Users } from "lucide-react"
 
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
 import { FilterBar } from "@/components/shared/filter-bar"
 import { PersonAvatar } from "@/components/shared/person-avatar"
+import { VerifiedBadge } from "@/components/shared/verified-badge"
 import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
 import { Button } from "@/components/ui/button"
 import {
@@ -36,14 +37,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table } from "@/components/motion/table"
+import type { TableColumn } from "@/components/motion/table"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,10 +48,13 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 import * as designerRepository from "@/lib/repositories/designerRepository"
+import * as profileRepository from "@/lib/repositories/profileRepository"
 import * as squadRepository from "@/lib/repositories/squadRepository"
-import { getDesignerUsage } from "@/lib/selectors/designerSelectors"
+import { getDesignerUsage, isDesignerVerified } from "@/lib/selectors/designerSelectors"
 import { useRepositoryList } from "@/lib/hooks/use-repository-list"
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
+import { useCurrentDesignerId } from "@/lib/identity/current-user"
+import { personDisplayName } from "@/lib/identity/person-display"
 import { activeOrSelected, byName } from "@/lib/domain/optionHelpers"
 import { SENIORITIES, type Seniority } from "@/lib/domain/enums"
 import type { Designer } from "@/lib/domain/types"
@@ -92,9 +90,12 @@ const EMPTY_FORM: DesignerFormState = {
 export default function DesignersPage() {
   const [designers, refreshDesigners] = useRepositoryList(designerRepository)
   const [squads, refreshSquads] = useRepositoryList(squadRepository)
+  // Subscribed only so the Verified badge updates live when someone finishes
+  // onboarding and claims a row while this page is open.
+  useRepositoryList(profileRepository)
+  const currentDesignerId = useCurrentDesignerId()
   const [query, setQuery] = useState("")
   const debouncedQuery = useDebouncedValue(query, 250)
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
 
   const [isDialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -114,15 +115,10 @@ export default function DesignersPage() {
 
   const visibleDesigners = useMemo(() => {
     const trimmedQuery = debouncedQuery.trim().toLowerCase()
-    const matches = trimmedQuery
-      ? designers.filter((designer) =>
-          designer.name.toLowerCase().includes(trimmedQuery)
-        )
+    return trimmedQuery
+      ? designers.filter((designer) => designer.name.toLowerCase().includes(trimmedQuery))
       : designers
-    const sorted = [...matches].sort((a, b) => a.name.localeCompare(b.name))
-    if (sortDirection === "desc") sorted.reverse()
-    return sorted
-  }, [designers, debouncedQuery, sortDirection])
+  }, [designers, debouncedQuery])
 
   // Active squads, plus the designer's current squad even if it has since gone
   // Inactive (so editing an existing designer never hides their real value).
@@ -216,9 +212,91 @@ export default function DesignersPage() {
     refresh()
   }
 
-  function toggleSort() {
-    setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))
-  }
+  const columns: TableColumn<Designer>[] = [
+    {
+      key: "avatar",
+      header: <span className="sr-only">Avatar</span>,
+      width: "56px",
+      cell: (designer) => <PersonAvatar person={designer} size="sm" />,
+    },
+    {
+      key: "name",
+      header: "Name",
+      sortable: true,
+      sortValue: (designer) => personDisplayName(designer, currentDesignerId).toLowerCase(),
+      cell: (designer) => (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="font-medium text-foreground">
+            {personDisplayName(designer, currentDesignerId)}
+          </span>
+          {isDesignerVerified(designer.id) ? <VerifiedBadge /> : null}
+        </span>
+      ),
+    },
+    {
+      key: "job_title",
+      header: "Job Title",
+      cell: (designer) => <span className="text-muted-foreground">{designer.job_title}</span>,
+    },
+    {
+      key: "seniority",
+      header: "Seniority",
+      cell: (designer) => <span className="text-muted-foreground">{designer.seniority}</span>,
+    },
+    {
+      key: "home_squad",
+      header: "Home Squad",
+      cell: (designer) => (
+        <span className="text-muted-foreground">
+          {squadsById.get(designer.home_squad_id)?.name ?? "–"}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (designer) => <EntityStatusBadge status={designer.status} />,
+    },
+    {
+      key: "actions",
+      header: <span className="sr-only">Actions</span>,
+      width: "56px",
+      align: "right",
+      cell: (designer) => (
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
+            <MoreHorizontal />
+            <span className="sr-only">Actions for {designer.name}</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => openEditDialog(designer)}>Edit</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => handleToggleStatus(designer)}>
+              {designer.status === "Active" ? "Deactivate" : "Activate"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={designer.id === currentDesignerId}
+              title={
+                designer.id === currentDesignerId
+                  ? "You can't delete your own designer record."
+                  : undefined
+              }
+              onClick={() => setDeletingDesigner(designer)}
+            >
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+    },
+  ]
+
+  // Shrink-wraps to the roster's own row count (up to a scroll cap) instead of
+  // reserving the table's default fixed viewport, so a short roster doesn't
+  // sit inside a mostly-empty scroll area.
+  const tableHeight = Math.min(560, (visibleDesigners.length + 1) * 48)
 
   const hasAnyDesigners = designers.length > 0
   const hasResults = visibleDesigners.length > 0
@@ -268,89 +346,13 @@ export default function DesignersPage() {
                 }
               />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">
-                      <span className="sr-only">Avatar</span>
-                    </TableHead>
-                    <TableHead aria-sort={sortDirection === "asc" ? "ascending" : "descending"}>
-                      <button
-                        type="button"
-                        onClick={toggleSort}
-                        className="flex items-center gap-1 text-foreground hover:text-foreground/80"
-                      >
-                        Name
-                        {sortDirection === "asc" ? (
-                          <ArrowUp className="size-3.5" />
-                        ) : (
-                          <ArrowDown className="size-3.5" />
-                        )}
-                      </button>
-                    </TableHead>
-                    <TableHead>Job Title</TableHead>
-                    <TableHead>Seniority</TableHead>
-                    <TableHead>Home Squad</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-10">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleDesigners.map((designer) => {
-                    const squad = squadsById.get(designer.home_squad_id)
-                    return (
-                      <TableRow key={designer.id} className="hover:bg-transparent">
-                        <TableCell>
-                          <PersonAvatar person={designer} size="sm" />
-                        </TableCell>
-                        <TableCell className="font-medium text-foreground">
-                          {designer.name}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {designer.job_title}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {designer.seniority}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {squad?.name ?? "–"}
-                        </TableCell>
-                        <TableCell>
-                          <EntityStatusBadge status={designer.status} />
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              render={<Button variant="ghost" size="icon-sm" />}
-                            >
-                              <MoreHorizontal />
-                              <span className="sr-only">Actions for {designer.name}</span>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => openEditDialog(designer)}>
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleToggleStatus(designer)}>
-                                {designer.status === "Active" ? "Deactivate" : "Activate"}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                variant="destructive"
-                                onClick={() => setDeletingDesigner(designer)}
-                              >
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+              <Table
+                data={visibleDesigners}
+                columns={columns}
+                getRowId={(designer) => designer.id}
+                defaultSort={{ key: "name", direction: "asc" }}
+                height={tableHeight}
+              />
             )}
           </>
         )}

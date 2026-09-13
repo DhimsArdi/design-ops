@@ -4,6 +4,100 @@ This file records meaningful product requirement changes.
 
 Do not use this file for minor visual polish, refactoring, or implementation-only changes.
 
+## 2026-09-13 — Master Data → Designers and Stakeholders show a Verified badge for rows claimed by a real account
+
+- **New "Verified" badge** (`docs/PRD.MD` §6.1, §15, §19) next to the Name column on Master Data → Designers and → Stakeholders. It marks a row as claimed by a real invited account that signed in and completed Onboarding — i.e. `profiles.designer_id`/`profiles.stakeholder_id` points at it — distinguishing it from a row created directly in Master Data with no account behind it. Nothing new is stored: this reuses the existing `Profile.designer_id`/`Profile.stakeholder_id` link (already in the domain model) rather than adding a field to Designer/Stakeholder. See `docs/DECISIONS.md` for why it's computed rather than stored.
+
+## 2026-09-13 — Global filter toolbar simplification: Projects drops duplicate quick filters, Squads gains a Filters panel
+
+- **Projects** (§14.3): Needs Allocation, Status, Priority, and Department no longer appear as separate standalone toolbar controls — they were previously duplicated between the toolbar and the existing Advanced Filters popover. All four now live only inside the single "Filters" panel (Needs Allocation/Status/Priority/Department apply live; Epic/Owner Squad/Design Lead/Timeline/Health/Show Archived stay staged behind Apply/Reset, unchanged). The Filters button's badge now counts every active filter, not just the staged ones.
+- **Squads** (§14.7, §29.1): gained its first "Filters" panel, consolidating Staffing, Lead, and Status behind one button instead of three standalone dropdowns, plus a removable-chip row for active filters — matching the pattern already used by Projects and Timeline.
+- **Both pages**: the Board/List/Table (Projects) and Table/Squad (Squads) view switcher now shares one row with Search and Filters, instead of sitting on its own row above it (§29.1). People, Timeline, and Master Data screens are unaffected — see `docs/DECISIONS.md`.
+
+## 2026-09-13 — Squads gains a Squad View kanban; designers can now be explicitly shared into a squad
+
+- **New "Squad View"** (`docs/PRD.MD` §13.1, §14.7): a Table/Squad toggle on the Squads page (default Table, unchanged) switches to a horizontal, non-wrapping kanban of every visible squad. Each column shows its Squad Lead, its Designers, and its owned Projects (collapsed to a count, expandable). Table View's behavior, filters, and Master-Data-only editing are unchanged.
+- **Designers can be dragged between squad columns.** A drop never mutates anything by itself — it opens a Move-vs-Share confirmation. **Move** reassigns the designer's Primary Squad (`home_squad_id`), same as the existing Master Data move flow. **Share** is new: it adds the designer to the target squad's roster while keeping their Primary Squad untouched.
+- **New entity: Squad Designer Membership** (`docs/PRD.MD` §8.2.1) — `id, designer_id, squad_id`. Records only *shared* (non-Primary) squad membership; a designer's Primary Squad is still exactly `home_squad_id`. Deliberately independent of Project Assignment and of the existing, fully-derived Cross-squad Logic (§32) — see `docs/DECISIONS.md` for why a stored membership table was chosen over deriving "shared" from project assignments.
+- Clicking a designer (in either squad column) opens a right-side **Designer Details** sheet — Overview / Squads / Projects / About tabs — instead of navigating away, so the board stays in view. The Squads tab shows every membership with a Primary/Shared badge and an "Add to another squad" action (adds a Shared membership only).
+- Squad View's search additionally matches designer names, so a squad stays visible if it contains a matching designer even when the squad's own name doesn't match — Table's own search is unchanged (squad name only).
+
+## 2026-09-13 — The "Teams" nav item and page are now called "Squads"
+
+- **Renamed the "Teams" nav item and its page to "Squads"** (`docs/PRD.MD` §14.7, §29.1, §30): page title, "Back to Squads" link, the Overview "Squad Snapshot" section, and the Master Data banner's cross-reference all updated to match. The route (`/teams`) and internal identifiers (`TeamsFilterBar`, `TeamsPage`, etc.) are unchanged — this was a copy-only rename, not a URL/architecture change. See `docs/DECISIONS.md` for why "Squads" was kept even though it now reads the same as Master Data → Squads.
+
+## 2026-09-13 — Onboarding now ends with a captcha before "Continue to DesignOps"
+
+- **Added a human-verification step to first-login Onboarding** (`docs/PRD.MD` §6): after filling in and passing validation on the identity and team profile fields, "Continue" moves to a **second screen** — a claw-machine captcha (`playcaptcha`, `ClawCaptcha`) with its own "Confirm" button, which is what actually saves. Not inserted into the same form/page as the fields. A "Back" link returns to the fields screen. Scoped to the Onboarding gate only — Settings → Profile, which reuses the same `useProfileIdentityForm` hook, is unaffected; that hook's field-validation guards were split into a standalone `validate()` so Onboarding can run them before switching screens instead of only after the captcha is solved. See `docs/DECISIONS.md` for why this specific package and how its assets/theming are wired in.
+
+## 2026-09-13 — Team profile is now an explicit Create new / Link existing choice
+
+- **Fixed a real UX gap:** "Designer record" (and "Stakeholder record") looked like a single link-only picker, with the actual "create a new one" path living in a separate field below it that was easy to miss entirely — especially for the very common case of an invited account with no existing record to link to in the first place.
+- **Both are now a `Create new` / `Link existing` tab switcher** (`docs/PRD.MD` §6.1), defaulting to **Create new** — the common case, since most accounts reaching this screen have never had a Designer/Stakeholder row before. `Create new` shows just the field needed to make one (Home Squad for Designer; nothing extra for Stakeholder, since Department above already covers it) and states the name it'll be created with. `Link existing` shows the picker of unclaimed records, and says plainly when there are none ("use Create new instead"). Switching tabs clears whatever the other tab had set, so there's no stale state left over from a tab you switched away from.
+
+## 2026-09-13 — Onboarding now requires a linked Designer record for designer roles
+
+- **Fixed:** an invited account could finish onboarding with a designer-type Design role (e.g. "UI Designer") but no linked Designer record, since Home Squad — the field that creates one — was left fully optional. They'd never show up in Master Data → Designers, Squad Lead, or supporting-designer pickers until someone realized and fixed it manually.
+- **Onboarding now requires ending up linked to a Designer record** whenever the chosen Design role is a designer-type one (`docs/PRD.MD` §6): link an existing unclaimed Designer, or pick a Home Squad to create one — either satisfies it. Home Squad itself stays optional; it's one of two ways to satisfy the requirement, not a requirement on its own. Department Head/Stakeholder linking is unaffected and stays fully optional, as does everything in ongoing Settings → Profile edits (an existing account can still unlink itself).
+
+## 2026-09-13 — Master Data → Designers marks your own row and blocks self-delete
+
+- **The signed-in account's own Designer row now reads `[Name] (Me)`** in Master Data → Designers (`docs/PRD.MD` §15), matching the "(Me)" convention every other person picker in the app already uses (§14.11).
+- **Delete is disabled for that row**, unconditionally — not just when it has project assignments or a squad lead role. An account should never be able to delete the record standing in for itself.
+
+## 2026-09-13 — Fixed a foreign-key race on self-provisioning; required/optional fields now labeled
+
+- **Fixed: creating a linked Designer or Stakeholder from Settings/Onboarding could fail** with `violates foreign key constraint "profiles_designer_id_fkey"`. The create call was the optimistic, fire-and-forget `designerRepository.create()` — its actual Supabase insert runs in the background — while the very next step (an awaited `profiles` update pointing `designer_id` at that new row) could reach the database first. Fixed with new awaited variants, `designerRepository.createAwaited` / `stakeholderRepository.createAwaited`, used exactly where a just-created id is about to be written into another row's real foreign key in the same action.
+- **Every field in Settings → Profile / Onboarding now says Required or Optional** next to its label (`docs/PRD.MD` §6.1), instead of leaving it to be inferred from paragraph copy — Full name and (on Onboarding only) Design role are Required; Department and the Designer/Stakeholder linking fields are always Optional.
+
+## 2026-09-13 — New accounts complete their profile before reaching the app
+
+- **A first-login onboarding gate** (`docs/PRD.MD` §6): an account that hasn't chosen a Design role yet sees a dedicated screen — no sidebar, no navigation — instead of the homepage, until it has one. It reuses the exact same fields and logic as Settings → Profile (name, department, design role, Team profile linking/creation), extracted into a shared hook (`useProfileIdentityForm`) and two shared field components so the two can never drift apart. `Design role` is the one field this screen actually requires; Department and the Designer/Stakeholder link stay optional, same as Settings. There's no separate "has onboarded" flag — the gate is purely `!profile.design_role`, so it clears itself the moment that's saved.
+- **Fixed: data-load failures always showed "Unknown error"** regardless of the real cause. `PostgrestError` (what Supabase throws) isn't a JS `Error` instance, so the old `error instanceof Error` check always fell through to the generic fallback. The real message now surfaces on the "Couldn't load your data" screen.
+
+## 2026-09-13 — Settings → Profile can self-provision a Designer or a Department Head Stakeholder; Job title replaced with Department
+
+- **"Department Head" is a new `Design role` value** (`docs/PRD.MD` §6.1, §8.10), alongside Product Designer/UX Designer/etc. It is the one value that does not make the account a Designer — it makes it a Stakeholder instead (`stakeholder_type = "Department Head"`), so the account shows up in Master Data → Stakeholders rather than Master Data → Designers.
+- **Settings → Profile can create the linked record itself**, for either side, instead of only linking to one that already exists in Master Data: picking a Designer-type role with no link offers a Home Squad field to create-and-link a Designer on save; picking Department Head with no link uses the account's own Department (see below) to create-and-link a Stakeholder on save. This is what makes "assign myself as Project Design Lead" work without a separate Master Data step first.
+- **Changing `Design role` across the Designer/Department-Head boundary drops the old link**, deleting that record too when nothing else references it. If the outgoing record still has project assignments, squad leadership, department-head duty, or project references, the role change is blocked with the same guard Master Data's own Delete button uses (`getDesignerUsage`/`getStakeholderUsage`), until those are reassigned elsewhere.
+- **`Job title` is removed from Settings → Profile**, replaced by a new **`Department`** field sourced from Master Data → Departments. It feeds the Stakeholder record created for a Department Head account; for everyone else it is just a personal detail. `Designer.job_title` and `Stakeholder.title` are unaffected and remain editable only in their own Master Data pages — Profile no longer mirrors a job title onto either.
+- **Schema change**: `profiles.job_title` dropped; `profiles.department_id` and `profiles.stakeholder_id` added (`supabase/migrations/003_department_head_profiles.sql`). Existing deployments must run that migration; any previously saved `job_title` value is lost (docs/DECISIONS.md).
+
+## 2026-09-13 — Projects becomes an operational workspace: Board, List, and Table
+
+- **Projects gained three view modes** (`docs/PRD.MD` §14.3): `Board` (new default), `List` (new), and `Table` (the previous view, extended). The old `Active | Completed | All` lifecycle tabs are gone — the view switcher and the lifecycle scope are unrelated axes now, and the choice of view persists locally across visits, except an Overview drill-down link always lands on Table.
+- **Board is a 3-column operational workspace**: To Do / In Progress / Done, mapping to the existing `Planning` / `In Progress` / `Completed` statuses. `On Hold` and `Cancelled` are deliberately never a column, but stay discoverable via a small secondary count strip rather than being hidden.
+- **Status display labels changed, the stored enum did not.** `Planning` now renders as "To Do" and `Completed` as "Done" everywhere a status shows (Overview, Timeline, People, Projects) via one new label map — no data migration, no schema change (`docs/DECISIONS.md`).
+- **An explicit lifecycle transition matrix**, enforced whether by drag or by an explicit button: To Do → In Progress (gated on at least one designer assigned), In Progress → Done (opens the existing "Mark as complete" flow), Done → In Progress (reopen). Direct To Do ↔ Done moves are rejected with an explanation. Every transition has a non-drag control — drag is never the only way to move a card.
+- **Real drag-and-drop** on the Board, via a new dependency (`@dnd-kit/core` + `@dnd-kit/utilities`) — the first drag library in this repo. The write itself reuses the same optimistic `projectRepository.update` pattern Timeline's drag-to-reschedule already relies on.
+- **"Assign design team" is one dialog**, reachable from Board cards, List rows, Table's new Designers column, and the "Unable to start project" block — sets Lead and Support together and persists through one new repository function, `projectAssignmentRepository.reconcile()`, which also replaced the previously-duplicated diffing logic in the Add/Edit Project wizard and `AssignLeadControl`.
+- **A new "Needs Allocation" quick filter** — no Lead and no Support assigned at all — distinct from the existing Lead-only "Design Lead: Unassigned" filter (relabeled to "No Design Lead" for clarity). Both are independently useful and can match different projects.
+- **Table gained a Designers column** (an avatar group of Supporting Designers, opening the same Assign dialog); Design Lead is unchanged.
+- **Creating a project already required no designer** — Lead and Support were already optional in the wizard, both in the UI and in validation. No change was needed there.
+- No change to the underlying `ProjectStatus` enum, the Supabase schema, or Overview's/Timeline's/People's own status-based logic.
+
+## 2026-09-13 — Add/Edit Project is a sectioned wizard; Project Health leaves project creation
+
+- **Every step is now a set of named sections** (`docs/PRD.MD` §20-24): purpose on the left, controls on the right, a single rule between sections, and no card per section. The `Step 1 of 4: Project Context` heading is gone — the stepper says where the user is.
+- **Step 1 is grouped into Project Details / Ownership / Project Classification** (§21). Same fields, asked in the order the questions come: what is this project, who owns it, how is it tracked.
+- **Project Health is no longer asked when creating a project** (§21). A project with no work behind it has nothing to assess; the field appears in Edit Project only. The stored value of a new project is unchanged — adding a real "Not assessed" state would be a change to §11 and the schema, and was deliberately left as a follow-up (`docs/DECISIONS.md`).
+- **Product Owner, Project Admin / PIC and Supporting Designers are searchable pickers** instead of permanently expanded checklists of every stakeholder or designer. Chosen people stay listed under the field, each removable.
+- **Review is a read-only summary with a per-section `Edit`** that returns to the step that owns it (§24), instead of a flat list of values.
+- **Validation moved onto the fields** (§20): the standing `Required to continue: …` line is gone. A field states its own problem under itself once `Next` has been pressed on that step; `Next` stays enabled and reveals what is missing rather than sitting disabled.
+- **The stepper distinguishes completed / current / upcoming** and lets the user jump back to any reached step; steps beyond what the entered data supports stay inert.
+- **`End Date` reads `Target End Date`** in the UI (§22). The stored field is still `end_date`.
+- No change to project creation logic, the data model, the schema, assignment/monthly-target/weekly-focus reconciliation, or Edit Project's behaviour.
+
+## 2026-09-13 — Squad membership is manageable from Master Data → Squads
+
+- **`View members` is replaced by `Add member` + `Manage members`** in the Squads row menu (`docs/PRD.MD` §16). Staffing a squad no longer means going to the Designers tab and editing one designer at a time.
+- **No new source of truth.** Membership is still derived from `Designer.home_squad_id` and nothing else; every action here writes that field (or `Squad.lead_designer_id`), so member counts, Designers, Teams, People and Overview stay in step on their own.
+- **`Add member`** opens a searchable multi-select of Active designers not already in the squad, each row showing their job title and current squad. Home Squad is single and required, so every add is a move — the dialog says so for the actual selection before it is confirmed.
+- **`Manage members`** lists the current members with a `Squad Lead` badge and per-member actions: `Make Squad Lead` / `Remove as Squad Lead`, and `Move to another squad`. There is deliberately **no** `Remove from squad`: a designer cannot exist without a home squad (§25), so leaving one requires choosing another, and the move step collects that destination.
+- **Squad Lead protection.** Moving a lead out of the squad they lead states the impact first and then sets that squad's Squad Lead to Unassigned, rather than leaving a lead who is no longer a member. Applies both when moving this squad's lead away and when adding someone who leads the squad they come from.
+- **The member count is now a link.** `3 designers` opens Manage members; the table row itself stays non-clickable. An empty squad shows `0 designers · Add member`, matching Teams' existing `No designers · Add`.
+- **Teams is unchanged in behaviour** (§14.7) — its "Add" dialog is now the same shared component Squads uses, so the two flows can't drift apart.
+
 ## 2026-09-13 — The account menu is the only door to Settings
 
 - **The `Settings` nav row is gone from the sidebar footer** (`docs/PRD.MD` §7). Settings and the account were two rows one centimetre apart answering the same question — "this is about me, not about the work". The footer is now a single account row, and Settings lives inside the menu it opens.

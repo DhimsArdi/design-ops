@@ -43,6 +43,22 @@ alter table public.squads
   foreign key (lead_designer_id) references public.designers (id)
   on delete set null;
 
+-- Shared (non-home) squad membership — designers.home_squad_id remains each
+-- designer's one Primary Squad; this table only ever holds *additional*
+-- memberships, written by the Teams → Squad View kanban (docs/PRD.MD §13.1).
+-- Deliberately independent of project_assignments: a designer can be shared
+-- into a squad's roster with no project behind it, and a cross-squad project
+-- assignment does not, by itself, create a row here (docs/DECISIONS.md).
+create table public.squad_designer_memberships (
+  id          uuid primary key default gen_random_uuid(),
+  designer_id uuid not null references public.designers (id) on delete cascade,
+  squad_id    uuid not null references public.squads (id) on delete cascade,
+  constraint squad_designer_memberships_unique unique (designer_id, squad_id)
+);
+
+create index squad_designer_memberships_designer_id_idx on public.squad_designer_memberships (designer_id);
+create index squad_designer_memberships_squad_id_idx on public.squad_designer_memberships (squad_id);
+
 create table public.departments (
   id                 uuid primary key default gen_random_uuid(),
   name               text not null,
@@ -194,11 +210,16 @@ create index designers_home_squad_id_idx on public.designers (home_squad_id);
 -- supabase/migrations/002_profiles.sql — this is the same DDL, kept here so a
 -- fresh install from this file alone is complete.
 --
---   auth.users ──1:1── profiles ──0..1── designers
---   (login)            (account)         (person: squad, assignments, leadership)
+--                     ┌─0..1── designers   (person: squad, assignments, leadership)
+--   auth.users ──1:1── profiles
+--                     └─0..1── stakeholders (person: department head)
+--   (login)            (account)
 --
--- designer_id is nullable in both directions: not every designer has a login,
--- and not every login is a designer.
+-- designer_id/stakeholder_id are nullable in both directions: not every
+-- designer or stakeholder has a login, and not every login is either. The two
+-- are mutually exclusive in practice, driven by design_role — 'Department
+-- Head' links to a stakeholder, every other non-null value links to a
+-- designer (docs/DECISIONS.md).
 
 create table public.profiles (
   id                    uuid primary key references auth.users (id) on delete cascade,
@@ -206,7 +227,6 @@ create table public.profiles (
   -- Email is NOT mirrored here: auth.users owns it (docs/DECISIONS.md).
   full_name             text not null default '',
   avatar_url            text,
-  job_title             text not null default '',
 
   -- Design discipline, not authorization. Kept separate from system_role
   -- below on purpose (PRD §6.1).
@@ -214,7 +234,7 @@ create table public.profiles (
                           design_role in (
                             'Product Designer', 'UX Designer', 'UI Designer',
                             'UX Researcher', 'Design Lead', 'Design Manager',
-                            'Design Ops', 'Other'
+                            'Design Ops', 'Department Head', 'Other'
                           )
                         ),
   -- Everyone is still Admin (PRD §6); Editor/Viewer land here when they
@@ -222,8 +242,18 @@ create table public.profiles (
   system_role           text not null default 'Admin' check (
                           system_role in ('Admin', 'Member', 'Viewer')
                         ),
-  -- The person this account is, in the app's own people table.
+
+  -- This account's own department (PRD §6.1). Replaces the old free-text
+  -- job_title, which nothing reads or writes anymore. `set null` rather than
+  -- restrict: a Department can still be retired/deleted freely even though a
+  -- profile points at it — this is a personal detail, not planning data a
+  -- delete should be blocked on.
+  department_id         uuid references public.departments (id) on delete set null,
+
+  -- The person this account is, in the app's own people tables. At most one
+  -- of these is non-null at a time (design_role decides which).
   designer_id           uuid unique references public.designers (id) on delete set null,
+  stakeholder_id        uuid unique references public.stakeholders (id) on delete set null,
 
   language              text not null default 'en' check (language in ('en')),
   -- No CHECK: the offered list (src/lib/domain/enums.ts) is meant to grow.
@@ -312,7 +342,7 @@ begin
   foreach t in array array[
     'squads', 'designers', 'departments', 'stakeholders', 'epics',
     'projects', 'project_assignments', 'project_monthly_targets',
-    'project_weekly_focus'
+    'project_weekly_focus', 'squad_designer_memberships'
   ] loop
     execute format('alter table public.%I enable row level security', t);
     execute format(
@@ -347,7 +377,7 @@ create policy profiles_update_own
 -- back. id, system_role, created_at and updated_at are absent deliberately.
 revoke update on public.profiles from authenticated;
 grant update (
-  full_name, avatar_url, job_title, design_role, designer_id,
+  full_name, avatar_url, design_role, department_id, designer_id, stakeholder_id,
   language, timezone, week_starts_on,
   default_landing_page, default_timeline_view, theme
 ) on public.profiles to authenticated;
@@ -371,3 +401,4 @@ alter publication supabase_realtime add table public.project_assignments;
 alter publication supabase_realtime add table public.project_monthly_targets;
 alter publication supabase_realtime add table public.project_weekly_focus;
 alter publication supabase_realtime add table public.profiles;
+alter publication supabase_realtime add table public.squad_designer_memberships;

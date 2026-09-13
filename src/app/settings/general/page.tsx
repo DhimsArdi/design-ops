@@ -16,7 +16,7 @@ import { useState, type FormEvent } from "react"
 import { toast } from "sonner"
 
 import { PageHeader } from "@/components/shared/page-header"
-import { SettingsSection } from "../_components/settings-section"
+import { SettingsSection } from "@/components/shared/settings-section"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"

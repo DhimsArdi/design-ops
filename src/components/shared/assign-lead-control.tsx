@@ -31,26 +31,22 @@ import { cn } from "cn"
  * Sets this project's Lead assignment to `designerId`, reconciling the same
  * "zero-or-one Lead" / "no duplicate designer across Lead+Support" rules
  * (PRD §8.7) the Add/Edit Project wizard applies on full save — just scoped
- * to a single inline field edit instead of a whole-form diff.
+ * to a single inline field edit instead of a whole-form diff. Promoting an
+ * existing Support designer to Lead drops their Support row (no duplicate
+ * across roles); everyone else's Support row is left untouched.
  */
 function assignProjectLead(projectId: string, designerId: string): void {
   const assignments = getProjectAssignments(projectId)
   const currentLead = assignments.find((assignment) => assignment.project_role === "Lead")
   if (currentLead?.designer_id === designerId) return
-  if (currentLead) projectAssignmentRepository.remove(currentLead.id)
 
-  const existingSupportRow = assignments.find(
-    (assignment) => assignment.designer_id === designerId && assignment.project_role === "Support"
+  const support = assignments.filter(
+    (assignment) => assignment.project_role === "Support" && assignment.designer_id !== designerId
   )
-  if (existingSupportRow) {
-    projectAssignmentRepository.update(existingSupportRow.id, { project_role: "Lead" })
-  } else {
-    projectAssignmentRepository.create({
-      project_id: projectId,
-      designer_id: designerId,
-      project_role: "Lead",
-    })
-  }
+  projectAssignmentRepository.reconcile(projectId, [
+    ...support.map((assignment) => ({ designerId: assignment.designer_id, role: "Support" as const })),
+    { designerId, role: "Lead" as const },
+  ])
 }
 
 interface AssignLeadControlProps {

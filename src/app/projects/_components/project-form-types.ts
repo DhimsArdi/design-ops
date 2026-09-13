@@ -22,6 +22,7 @@ import type {
   ProjectMonthlyTarget,
   ProjectWeeklyFocus,
 } from "@/lib/domain/types"
+import type { ProjectRole } from "@/lib/domain/enums"
 import { activeOrSelected, byName } from "@/lib/domain/optionHelpers"
 import { mondaysInMonthRange } from "@/lib/domain/weekUtils"
 import { monthOf } from "@/lib/domain/dateUtils"
@@ -67,6 +68,17 @@ interface WeeklyFocusItemState {
   description: string
 }
 
+/** Per-field validation messages for Step 1, keyed by the field they belong
+ * under. Computed by the wizard — which is the only place that knows whether
+ * the user has tried to continue yet — so a step component never decides on
+ * its own when to complain. An absent key means that field is fine. */
+type ProjectContextErrors = Partial<
+  Record<"name" | "epicId" | "departmentId" | "productOwnerIds" | "ownerSquadId", string>
+>
+
+/** The same, for Step 2's date range. */
+type TimelineErrors = Partial<Record<"startDate" | "endDate", string>>
+
 interface ProjectFormState {
   context: ProjectContextFormState
   // Day-level, inclusive (PRD §8.2). The month rows below are derived from
@@ -88,6 +100,13 @@ function emptyProjectFormState(): ProjectFormState {
       projectAdminIds: [],
       priority: PRIORITIES[0],
       status: PROJECT_STATUSES[0],
+      // Health is not asked for when creating a project — a project with no
+      // work behind it yet has no evidence of being On Track or otherwise, so
+      // the wizard hides the field in create mode and it is first assessed
+      // from Edit Project. The column is `not null` with three allowed values
+      // (supabase/schema.sql), so a new row still has to carry one; adding a
+      // fourth "Not assessed" value would be a schema + Overview + Timeline
+      // change rather than a form change. See docs/DECISIONS.md.
       health: PROJECT_HEALTHS[0],
       timelineConfidence: TIMELINE_CONFIDENCES[0],
       ownerSquadId: "",
@@ -259,6 +278,18 @@ function weeklyFocusItemHasData(item: WeeklyFocusItemState): boolean {
   return item.title.trim() !== ""
 }
 
+/** The Lead+Support roster this form state wants — the `desired` argument
+ * for `projectAssignmentRepository.reconcile()` (docs/PRD.MD §8.7), on both
+ * create and edit. */
+function desiredAssignments(
+  team: DesignTeamFormState,
+): { designerId: string; role: ProjectRole }[] {
+  return [
+    ...(team.leadDesignerId ? [{ designerId: team.leadDesignerId, role: "Lead" as const }] : []),
+    ...team.supportDesignerIds.map((id) => ({ designerId: id, role: "Support" as const })),
+  ]
+}
+
 /** The items that actually get persisted as ProjectWeeklyFocus records. */
 function toPersistableWeeklyFocus(
   items: WeeklyFocusItemState[],
@@ -276,6 +307,7 @@ export {
   buildFormStateFromProject,
   buildMonthlyTargetRows,
   byName,
+  desiredAssignments,
   emptyProjectFormState,
   formatDateLabel,
   formatMonthLabel,
@@ -290,7 +322,9 @@ export {
 export type {
   DesignTeamFormState,
   MonthlyTargetRowState,
+  ProjectContextErrors,
   ProjectContextFormState,
   ProjectFormState,
+  TimelineErrors,
   WeeklyFocusItemState,
 }

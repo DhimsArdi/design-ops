@@ -195,6 +195,28 @@ Aplikasi memerlukan login (Supabase Auth, email + password). Akun dibuat lewat u
 
 Stakeholder tetap tidak login — mereka melihat aplikasi lewat presentasi/screen sharing.
 
+## Onboarding
+
+Akun yang baru login dan belum memilih `design_role` (§6.1) melihat satu layar onboarding, bukan langsung ke homepage — tidak ada sidebar, tidak ada navigasi, hanya form ini sampai terisi.
+
+```text
+Full name       wajib
+Department      opsional
+Design role     wajib — tidak boleh dibiarkan "Not set" untuk lanjut
+Team profile    tautan/pembuatan Designer atau Stakeholder record
+                — WAJIB berakhir tertaut ke Designer jika Design role adalah
+                  peran designer (bukan Department Head/Not set): tautkan
+                  yang sudah ada, atau buat baru dengan memilih Home Squad
+                — tetap opsional untuk Department Head/Stakeholder, sama
+                  seperti di Settings → Profile (§6.1)
+```
+
+Field dan perilakunya identik dengan Settings → Profile — halaman yang sama, dipakai ulang, bukan alur terpisah yang bisa berbeda aturan. Bedanya hanya bingkai (layar penuh, judul "Welcome to DesignOps", tombol "Continue to DesignOps") dan dua aturan tambahan yang hanya berlaku di sini: `Design role` tidak boleh "Not set", dan jika role-nya designer, akun harus berakhir tertaut ke sebuah Designer record sebelum bisa lanjut — supaya orang yang baru di-invite sebagai designer langsung muncul di Master Data → Designers, bukan menyelesaikan onboarding sebagai "UI Designer" yang tidak muncul di picker manapun. `Home Squad` sendiri tidak wajib diisi — itu cuma salah satu dari dua cara memenuhi syarat itu, cara satunya adalah menautkan Designer yang sudah ada. Department tetap opsional, begitu juga Team profile untuk Department Head.
+
+Tidak ada flag "sudah onboarding" yang tersimpan terpisah. Layar ini murni berdasar data: begitu `design_role` tersimpan, layar ini berhenti muncul dengan sendirinya — baik saat itu juga maupun di sesi berikutnya. Tersedia `Sign out` di layar ini untuk akun yang salah kirim undangan.
+
+Setelah field di atas diisi dan lolos validasi, tombol "Continue" membawa ke **layar kedua** (bukan disisipkan di halaman yang sama): sebuah captcha (claw-machine game — ambil mainan yang diminta), dengan tombol "Confirm" sendiri yang baru menyimpan data — jadi validasi field terjadi di layar pertama, dan captcha jadi langkah terpisah setelahnya, bukan bagian dari form yang sama. Tombol "Confirm" tetap disabled sampai captcha diselesaikan; ada juga link "Back" untuk kembali mengubah field di layar pertama. Ini tidak memengaruhi Settings → Profile (halaman itu tetap satu layar, tanpa captcha).
+
 ## Role
 
 Hanya satu application role:
@@ -245,23 +267,27 @@ Setiap akun yang login punya satu **Profile**. Profile adalah akun — bukan rec
 
 Profile menyimpan identitas akun dan preferensi personalnya (§8.10). Email **tidak** disalin ke Profile: Supabase Auth adalah satu-satunya sumber kebenaran untuk email, dan hanya dari sana email bisa diubah.
 
-## Hubungan Profile dan Designer
+## Hubungan Profile, Designer, dan Stakeholder
 
-Designer (§8.1) adalah *orang* yang ditunjuk oleh data perencanaan: home squad, project assignment, squad lead. Profile adalah *akun*. Keduanya dihubungkan oleh satu field opsional:
+Designer (§8.1) adalah *orang* yang ditunjuk oleh data perencanaan: home squad, project assignment, squad lead. Stakeholder (§8.5) adalah *orang* di sisi bisnis: Department Head, Product Owner, Project Admin / PIC. Profile adalah *akun*. Profile dihubungkan ke salah satu dari keduanya oleh dua field opsional yang saling eksklusif:
 
 ```text
-auth.users  ──1:1──  Profile  ──0..1──  Designer
-(login)              (akun)             (orang: squad, assignment, leadership)
+                    ┌─0..1──  Designer      (orang: squad, assignment, leadership)
+auth.users  ──1:1──  Profile
+                    └─0..1──  Stakeholder    (orang: department head)
+(login)              (akun)
 ```
 
-`Profile.designer_id` boleh null di kedua arah:
+`Profile.designer_id` dan `Profile.stakeholder_id` boleh null di kedua arah:
 
-* tidak semua Designer punya akun login (mereka dibuat di Master Data, bukan lewat undangan),
-* tidak semua akun adalah Designer (misalnya Design Ops atau manajer yang hanya membaca).
+* tidak semua Designer atau Stakeholder punya akun login (mereka bisa dibuat langsung di Master Data, bukan lewat undangan),
+* tidak semua akun adalah Designer atau Stakeholder (misalnya manajer yang hanya membaca).
 
-Akun yang **belum** ditautkan tetap akun yang lengkap dan berfungsi — ia hanya tidak muncul di people picker (Squad Lead, Supporting Designers). Penautan dilakukan sendiri oleh user di Settings → Profile, dan satu Designer hanya boleh diklaim oleh satu akun.
+Akun yang **belum** ditautkan tetap akun yang lengkap dan berfungsi — ia hanya tidak muncul di people picker (Squad Lead, Supporting Designers, Department Head). Yang menentukan tautan mana yang berlaku adalah `design_role` (lihat di bawah): nilai `Department Head` menautkan ke Stakeholder, semua nilai lain menautkan ke Designer. Keduanya tidak pernah terisi bersamaan.
 
-Saat tertaut, menyimpan Profile juga menulis `full_name` dan `job_title` ke record Designer tersebut. Sinkronisasi ini satu arah dan disengaja: record Designer adalah nama yang dibaca seluruh layar perencanaan, jadi nama di Settings dan nama di Squad tidak boleh berbeda.
+Penautan dilakukan sendiri oleh user di Settings → Profile — memilih record yang sudah ada, atau membuat satu baru untuk diri sendiri langsung dari Settings tanpa perlu berpindah ke Master Data. Satu Designer atau Stakeholder hanya boleh diklaim oleh satu akun. Mengubah `design_role` sehingga akun berpindah dari Designer ke Stakeholder (atau sebaliknya) melepas tautan yang lama; jika record lama itu masih punya project assignment, squad lead, department head, atau referensi project lain, perubahan role diblokir sampai referensi itu dipindahkan — guard yang sama dengan tombol Delete di Master Data (§25).
+
+Saat tertaut, menyimpan Profile juga menulis `full_name` ke record Designer atau Stakeholder tersebut (mana pun yang tertaut). Sinkronisasi ini satu arah dan disengaja: record itu adalah nama yang dibaca seluruh layar perencanaan, jadi nama di Settings dan nama di Squad/Project tidak boleh berbeda. `job_title` (Designer) dan `title` (Stakeholder) tetap dikelola sendiri-sendiri di Master Data masing-masing, tidak lagi disalin dari Profile.
 
 ## Design Role vs System Role
 
@@ -269,13 +295,15 @@ Dua sumbu berbeda, tidak boleh digabung menjadi satu field `role`:
 
 ```text
 design_role   apa yang dikerjakan orang ini
-              Product Designer, UX Researcher, Design Lead, ...
+              Product Designer, UX Researcher, Design Lead, ..., Department Head
               user boleh mengubahnya sendiri
 
 system_role   apa yang boleh dilakukan akun ini
               Admin, Member, Viewer
               user TIDAK boleh mengubahnya sendiri
 ```
+
+`Department Head` adalah nilai `design_role` yang berbeda dari yang lain: ia tidak membuat akun ini seorang Designer, melainkan seorang Stakeholder (lihat di atas). Namanya sengaja sama dengan `stakeholder_type` "Department Head" yang sudah ada (§8.5) — konsepnya memang satu.
 
 Di MVP setiap akun tetap Admin (§6). `system_role` sudah ada sekarang supaya Editor/Viewer nanti menjadi perubahan policy, bukan perubahan tipe data.
 
@@ -316,7 +344,7 @@ Overview
 Timeline
 Projects
 People
-Teams
+Squads
 Master Data
 ```
 
@@ -409,6 +437,31 @@ Malik
 Squad menunjukkan struktur organisasi.
 
 Squad tidak membatasi project assignment.
+
+---
+
+# 8.2.1 Squad Designer Membership (Shared Squad)
+
+Fields:
+
+```text
+id
+designer_id
+squad_id
+```
+
+A designer's **Primary Squad** is still exactly `Designer.home_squad_id` —
+unchanged from §8.1/§8.2. This table only ever records an *additional*,
+explicitly shared membership, written from Teams → Squad View (§14.7). It is
+deliberately independent of Project Assignment (§8.7) and of the Cross-squad
+Logic (§32): sharing a designer into a squad's roster does not require a
+project behind it, and a cross-squad project assignment does not, by itself,
+create a row here.
+
+A designer may have zero or many shared memberships, each in a squad that is
+not already their Primary Squad — a designer is never "shared" with the squad
+they already primarily belong to, and the same (designer, squad) pair cannot
+be recorded twice.
 
 ---
 
@@ -642,28 +695,30 @@ Satu row per akun Supabase Auth. Dibuat bersama akunnya, bukan saat pertama kali
 Fields:
 
 ```text
-id                      = user id Supabase Auth
+id                        = user id Supabase Auth
 full_name
 avatar_url (optional)
-job_title
 
-design_role (optional)  disiplin: Product Designer, UX Researcher, ...
-system_role             otorisasi: Admin | Member | Viewer  (tidak bisa diubah sendiri)
-designer_id (optional)  tautan ke Designer (§8.1), unik
+design_role (optional)    disiplin: Product Designer, UX Researcher, ..., Department Head
+system_role               otorisasi: Admin | Member | Viewer  (tidak bisa diubah sendiri)
 
-language                'en'
-timezone                nama zona IANA, default 'Asia/Jakarta'
-week_starts_on          'monday' | 'sunday'
+department_id (optional)  department akun ini sendiri (§8.4)
+designer_id (optional)    tautan ke Designer (§8.1), unik
+stakeholder_id (optional) tautan ke Stakeholder (§8.5), unik — hanya terisi saat design_role = Department Head
 
-default_landing_page    'overview' | 'projects' | 'timeline'
-default_timeline_view   'week' | 'month' | 'quarter' | 'year'
-theme                   'light' | 'dark' | 'system'
+language                  'en'
+timezone                  nama zona IANA, default 'Asia/Jakarta'
+week_starts_on            'monday' | 'sunday'
+
+default_landing_page      'overview' | 'projects' | 'timeline'
+default_timeline_view     'week' | 'month' | 'quarter' | 'year'
+theme                     'light' | 'dark' | 'system'
 
 created_at
 updated_at
 ```
 
-Profile **bukan** model orang kedua. Ia tidak menduplikasi Designer, Stakeholder, atau entitas master data lain — lihat §6.1 untuk hubungan dan aturan sinkronisasinya.
+Profile **bukan** model orang kedua. Ia tidak menduplikasi Designer, Stakeholder, atau entitas master data lain — lihat §6.1 untuk hubungan dan aturan sinkronisasinya. `department_id` adalah pengecualian kecil: itu murni detail personal akun ini (dipakai untuk membuat record Stakeholder saat `design_role` = Department Head), bukan tautan ke sebuah "orang" seperti `designer_id`/`stakeholder_id`.
 
 Preferensi disimpan di sini, bukan di localStorage, supaya ikut pindah ke perangkat berikutnya dan bisa dibaca kembali oleh aplikasi.
 
@@ -851,6 +906,27 @@ designer.home_squad_id != project.owner_squad_id
 ```
 
 Tidak perlu disimpan secara manual.
+
+## 13.1 Shared Squad Membership (Squad View)
+
+The Home Squad / Owner Squad / Cross-squad rules above are entirely derived
+and unchanged by this section — no manual override exists for them (§32).
+
+Alongside that, a Designer may also be explicitly **shared** into one or more
+additional squads from Teams → Squad View (§14.7, §8.2.1). This is a second,
+independent concept:
+
+```text
+Primary Squad     Designer.home_squad_id — exactly one, always
+Shared Squad(s)   Squad Designer Membership rows — zero or many, explicit
+```
+
+A Primary Squad never shows a "Shared" badge for that designer; every Shared
+Squad does. Moving a designer changes `home_squad_id` (their Primary Squad)
+and drops any now-redundant Shared membership in the new squad; sharing only
+ever adds a Shared membership and never touches `home_squad_id`. Neither
+action is driven by, or drives, a Project Assignment — see §32 for why the
+two stay separate.
 
 ---
 
@@ -1146,83 +1222,154 @@ Desktop-first. Every scale requires horizontal scrolling — keep the Project co
 
 ## Purpose
 
-Project directory / source of truth.
+An operational workspace, not only a directory: plan, assign, and track
+design projects across the team, in whichever of three view modes fits the
+task at hand.
 
-### Project List
+### Project lifecycle and its display labels
 
-Recommended table columns:
+The stored Project Status enum is unchanged (§10): `Planning`, `In
+Progress`, `On Hold`, `Completed`, `Cancelled`. Every screen that renders a
+status (Projects, Overview, Timeline, People) now renders a display label
+instead of the raw value — `Planning` reads as **To Do** and `Completed`
+reads as **Done**; `In Progress`, `On Hold`, and `Cancelled` keep their own
+name as their label. This is a display-only relabeling (no migration, no
+schema change) — filters, selectors, and every other piece of status logic
+still match on the underlying enum values.
 
-```text
-Project
-Epic
-Department
-Priority
-Status
-Owner Squad
-Design Lead
-Timeline
-Health
-Updated
-```
+### View modes: Board / List / Table
 
-Support:
-
-```text
-Search project
-Filter
-Sort
-```
-
-### Lifecycle tabs
-
-Above the filter toolbar, a segmented control scopes the list by lifecycle:
+A segmented control above the filter toolbar switches how the same
+filtered project set renders:
 
 ```text
-Active   Completed   All
+Board   List   Table
 ```
 
-Default: **Active** = Status ∈ {Planning, In Progress, On Hold}. **Completed**
-= Status = Completed only. **All** = every status, Cancelled included.
-Switching tabs clears any Status filter selection currently applied, since
-the tab is itself the primary status scope. The granular Status filter
-(below) is only shown, and only meaningful, inside the All tab — Active and
-Completed already imply their own scope.
+**Board** is the default, and the primary operational view. **List** and
+**Table** are equally available, and the choice persists locally
+(`localStorage`) across visits, the same way the sidebar's collapsed state
+already does — except an Overview drill-down link (`?status=`, `?health=`,
+`?designLead=`) always lands on Table, since Table is the one view whose
+Status filter is always visible and freely combinable.
 
-This "Active" is deliberately broader than Overview's Active Projects KPI
-(§14.1, Planning + In Progress only) — see that section for why the two
-definitions coexist. Archived visibility is independent of the tab and
-stays the existing "Show archived" toggle (below) in every tab.
+View mode and lifecycle status are unrelated axes: switching views never
+changes which projects are visible, only how they render. The old `Active |
+Completed | All` lifecycle tabs are gone — Board's columns and List's status
+groups already scope by lifecycle, and Table shows every status with the
+Status filter always reachable.
+
+#### Board
+
+Three fixed columns, mapping to three of the five stored statuses:
+
+```text
+To Do          (Planning)
+In Progress    (In Progress)
+Done           (Completed)
+```
+
+Each column header shows its label and a live project count. `On Hold` and
+`Cancelled` projects are **never** a Board column (per the "do not add an
+excessive number of workflow columns" rule below) — but they are not hidden
+from the page: whenever such projects exist in the current filtered set, a
+small strip above the columns shows their counts (e.g. "On Hold · 3 ·
+Cancelled · 1"), each a link that switches to Table/List pre-filtered to
+that status. The Status filter itself also stays visible and usable on
+Board, for anyone who wants to inspect them directly.
+
+A card shows Project Name, Epic/Department, Priority, a day-level Timeline
+range, Design Lead (or an "Unassigned · Assign" affordance), Designers (an
+avatar group, or a "No designer assigned" affordance), and Health — Health
+only on In Progress (§22: a newly created or already-finished project has
+no ongoing execution to assess). A Done card is deliberately quieter:
+Project Name, Team, and "Completed <date>" only — no Priority, no Health, no
+resource-assignment affordance, since a completed project no longer needs
+day-to-day tracking (§25).
+
+**Lifecycle transitions.** Only these moves are legal, whether by drag or by
+the card's own explicit button (drag is never the only way — see
+Accessibility, §29):
+
+```text
+To Do        -> In Progress   (gated: at least one designer assigned)
+In Progress  -> Done          (opens the same "Mark as complete" flow as Project Detail)
+Done         -> In Progress   (reopen)
+```
+
+`To Do -> Done` direct and `Done -> To Do` direct are not legal moves —
+both bypass the "started" state. Every legal transition also has an
+explicit, non-drag control on the card: "Start project" (disabled with an
+explanatory tooltip when the Start gate isn't met), "Mark done", and
+"Reopen". Dragging a card to an illegal target, or to In Progress without
+a designer assigned, is rejected with an explanation and does not change
+anything — see §10.3 for the Start gate itself.
+
+A Done column beyond a small number of recent cards caps itself with a
+"View all completed" link into Table/List, pre-filtered to Done — the same
+mechanism the On Hold/Cancelled strip uses, so the board never grows
+unusably tall (§9, §18 of the originating design brief).
+
+#### List
+
+The same projects, grouped by status for high-density scanning — one
+section per status actually present in the filtered set (To Do, In
+Progress, On Hold, Done, Cancelled, in that order), each with a header
+(label + count) and a dense row per project: name, epic/department,
+priority, timeline, Lead/Designers (or Assign), Health (In Progress only),
+and the same explicit lifecycle action as the Board card. Unlike Board, On
+Hold and Cancelled sections appear here whenever such projects are present
+— List's purpose is scanning everything, not Board's narrower operational
+focus.
+
+#### Table
+
+The detailed, portfolio-management view — every status, always. Columns:
+Project, Epic, Department, Priority, Status, Owner Squad, Design Lead,
+Designers, Timeline, Health. Design Lead stays the existing inline
+assignment control; Designers is a new column (an avatar group of
+Supporting Designers, opening the same Assign design team dialog Board and
+List use). Sort, search, and filters all work exactly as before.
 
 ### Filters
 
-A compact toolbar sits directly above the table (no large standalone filter card):
+A compact toolbar sits directly above the content (no large standalone filter card), sharing one row with the Board/List/Table switcher:
 
 ```text
-Search   Status   Priority   Department   Filters
+Board | List | Table          Search projects...   Filters
 ```
 
-Search matches project name, Epic, Department, Owner Squad, and Design Lead. Status, Priority, and Department are quick filters and apply immediately; Status and Priority are multi-select (e.g. Planning + In Progress at once).
+Search matches project name, Epic, Department, Owner Squad, and Design
+Lead. Every dataset filter — **Needs Allocation** (a quick toggle for
+projects with no designer assigned at all, Lead nor Support: the same
+predicate that gates "Start project"), **Status**, **Priority**, and
+**Department** — lives inside the single "Filters" panel rather than as its
+own standalone toolbar control, so the toolbar never shows the same filter
+twice (see `docs/DECISIONS.md`: global filter toolbar simplification).
+Status and Priority apply immediately and are multi-select (e.g. Planning +
+In Progress at once). Needs Allocation is a distinct concept from the
+existing "Design Lead: Unassigned" filter (Lead-only, and what Overview's
+"Unassigned Projects" KPI already links to) — the two coexist and can
+produce different result sets.
 
-"Filters" opens an Advanced Filters panel for the remaining, less-frequently-changed fields:
+"Filters" opens one panel for every dimension:
 
 ```text
-Epic
-Owner Squad
-Design Lead
-Timeline
-Health
-Show archived
+Needs Allocation, Status, Priority, Department   (quick — apply immediately)
+Epic, Owner Squad, Design Lead, Timeline, Health, Show archived   (staged)
 ```
 
-These are staged — changes take effect on "Apply" (or are cleared immediately by "Reset"), not as each field is touched. Owner Squad and Design Lead are searchable.
+The quick fields apply immediately; the rest are staged — changes take
+effect on "Apply" (or are cleared immediately by "Reset"). Owner Squad and
+Design Lead are searchable. The Filters button's badge counts every active
+dimension across both groups (`Filters · 3`), since it is now the toolbar's
+only indicator of active filter state.
 
 **Timeline** buckets a project's start/end date against today: `Active now` (today falls within the range), `Upcoming` (starts later), `Past` (already ended). See `docs/DECISIONS.md` for why this is a simple bucket rather than a full date-range picker.
 
-At narrower widths, Department (then Priority and Status) drop from the toolbar in favor of the Filters panel, which always additionally exposes Status/Priority/Department so they stay reachable — see `docs/DECISIONS.md`. The toolbar never wraps into multiple rows.
-
 Active filters (beyond Search) show as a row of small removable tokens directly under the toolbar; the row is absent entirely when no token would appear (a Search query alone does not produce one). Clearing everything is the shared toolbar's single "Clear filters" action — see §29.1.
 
-### Default sort
+### Default sort (Table)
 
 Recommended:
 
@@ -1242,13 +1389,34 @@ Primary button:
 + Add Project
 ```
 
+Creating a project never requires resource allocation to be complete —
+Design Lead and Supporting Designers are optional at creation (§20, §23);
+a project is always creatable with neither set, and always enters **To
+Do**. Assigning a designer to a project never, by itself, changes its
+status — starting a project is a separate, explicit action gated on §10.3
+below.
+
+### §10.3 Starting a project
+
+Before a project can move from To Do to In Progress, at least one
+responsible designer must be assigned — a Lead or a Support designer, both
+being the same underlying "Designer" entity and either a fully valid
+"someone is responsible for this" state on its own. If the user tries to
+start a project with no one assigned, the move is rejected with:
+
+```text
+Unable to start project
+Assign at least one designer before starting this project.
+[ Assign designer ]
+```
+
 ### Completed, Cancelled, and Archived Projects
 
 Unlike Overview and Timeline, the Projects page can show every status and
-archived projects too — reachable via the lifecycle tabs above, the Status
-filter (inside All), and the Show archived toggle, not shown by default
-alongside active work. Deleting a project (§25) is always available from
-this list's row menu as well as from Project Detail.
+archived projects too — reachable via List/Table, the Status filter, the
+Board's secondary strip, and the Show archived toggle, not shown by default
+alongside active work on the Board. Deleting a project (§25) is always
+available from this list's row menu as well as from Project Detail.
 
 ---
 
@@ -1542,13 +1710,13 @@ System tidak memberi warning otomatis apakah overlap tersebut terlalu berat.
 
 ---
 
-# 14.7 Teams
+# 14.7 Squads
 
 ## Purpose
 
 Menunjukkan struktur organisasi Design Team.
 
-### Team Overview
+### Squad Overview
 
 Example:
 
@@ -1564,7 +1732,36 @@ Lead: Raka
 
 Click squad → Squad Detail.
 
-A squad with zero members shows "No designers · Add" in its row. **Add** opens a dialog to search and multi-select Active designers and assign them to this squad in one step, without leaving Teams. Since Home Squad is a single required field per Designer (§8.1), selecting a designer here moves them out of whichever squad they currently belong to — the dialog lists each candidate's current squad so this is never a surprise. Squad Lead stays a link out to Master Data (unchanged).
+A squad with zero members shows "No designers · Add" in its row. **Add** opens a dialog to search and multi-select Active designers and assign them to this squad in one step, without leaving Squads. Since Home Squad is a single required field per Designer (§8.1), selecting a designer here moves them out of whichever squad they currently belong to — the dialog lists each candidate's current squad so this is never a surprise. Squad Lead stays a link out to Master Data (unchanged).
+
+### Filters
+
+The Table/Squad view switcher shares its row with Search and a single
+`Filters` button (§29.1) — Staffing (derived from member count: Has
+designers / No designers), Lead (assigned / unassigned), and Status all
+live inside that one panel rather than as separate standalone toolbar
+controls. No Department filter — `Squad` has no `department_id` in the
+domain model (§8.2). Active filters show as removable tokens under the
+toolbar, same as every other screen.
+
+### Squad View
+
+A second, kanban-style view of the same squads, switched via a Table/Squad
+toggle in the toolbar (default: Table). Squads render as fixed-width columns
+in one horizontal, non-wrapping row — never onto a second row — each showing
+its Squad Lead, its Designers (Primary members plus any Shared members,
+§13.1), and its owned Projects (collapsed to a count, expandable).
+
+Designers are dragged between squad columns to reallocate them; dropping one
+on another squad always asks **Move** (changes their Primary Squad) or
+**Share** (adds a Shared membership, keeping their Primary Squad) before
+anything is written — a drop never mutates membership silently. Clicking a
+designer opens a Designer Details sheet (Overview / Squads / Projects /
+About) rather than navigating away, so the board stays in view.
+
+Table View's own behavior, filters, and Master-Data-only editing are
+unchanged — Squad View is an additional way to read and reallocate the same
+structure, not a replacement.
 
 ---
 
@@ -1734,14 +1931,18 @@ Manage your personal information and identity across DesignOps.
 ```
 
 ```text
-Profile photo     inisial dari nama; belum ada upload
-Full name         wajib
-Job title         opsional
-Design role       opsional
-Designer record   tautan ke Designer (§6.1)
-Email             read-only
-Access level      read-only
+Profile photo             inisial dari nama; belum ada upload
+Full name                 wajib
+Department                opsional — wajib diisi dulu jika mau Design role = Department Head
+Design role                opsional
+Designer record           tautan ke Designer, atau buat baru langsung dari sini (§6.1)
+  — atau, jika Design role = Department Head —
+Stakeholder record        tautan ke Stakeholder, atau buat baru langsung dari sini (§6.1)
+Email                     read-only
+Access level              read-only
 ```
+
+"Team profile" menampilkan salah satu dari dua picker di atas, tergantung Design role yang dipilih: picker Designer untuk semua role kecuali Department Head, picker Stakeholder untuk Department Head. Keduanya menawarkan record yang sudah ada (dan belum diklaim akun lain) untuk ditautkan, atau membuat record baru untuk akun ini saat itu juga — tidak perlu berpindah ke Master Data. Mengubah Design role sehingga berpindah dari satu sisi ke sisi lain melepas tautan lama itu; jika record lama masih dirujuk di tempat lain (project assignment, squad lead, department head, project), perubahan diblokir sampai rujukan itu dipindahkan (§6.1, §25).
 
 Email read-only dan tidak boleh diubah dari sini sampai ada alur verifikasi email yang benar (§38). Access level ditampilkan sebagai fakta, bukan sebagai kontrol yang di-disable.
 
@@ -1792,7 +1993,7 @@ Aturan:
 
 Picker orang menampilkan avatar, nama, dan satu baris sekunder (job title) — cukup untuk membedakan dua orang, tidak lebih.
 
-Picker yang memakai aturan ini: Squad Lead (Master Data → Squads), Project Design Lead dan Supporting Designers (Add/Edit Project), aksi inline `Assign` untuk Design Lead, dan dialog `Add designers` di Teams.
+Picker yang memakai aturan ini: Squad Lead (Master Data → Squads), Project Design Lead dan Supporting Designers (Add/Edit Project), aksi inline `Assign` untuk Design Lead, dan dialog `Add designers` di Squads.
 
 ---
 
@@ -1822,6 +2023,10 @@ Use `Active` / `Inactive` to retire a designer that is still connected to histor
 
 **Delete** permanently removes a designer, but only when nothing currently references them: no Project Assignment row (Lead or Support, on any project regardless of that project's own status or archive state) and no Squad's Squad Lead. If either is true, Delete is blocked with a message naming what's still using it — deactivate instead. This guard is what keeps historical Project context from ever breaking (docs/DECISIONS.md); it is the same rule for every Master Data entity in §15–19 and for Project itself (§25).
 
+The row that is the signed-in account's own Designer (`Profile.designer_id`, §6.1) reads `[Name] (Me)`, matching every other person picker in the app (docs/PRD.MD §14.11), and its **Delete** action is disabled outright — an account can't delete the record standing in for itself. This is separate from and in addition to the usage guard above: it applies even to a designer with zero assignments.
+
+A **Verified** badge sits next to any row that some account has claimed via `Profile.designer_id` (§6.1) — i.e. someone was invited, signed in, and completed Onboarding into this record, rather than the row being created directly here in Master Data. Unverified is the normal state for a designer added ahead of that person's invite; it is not an error or a warning.
+
 ---
 
 # 16. Master Data — Squads
@@ -1844,6 +2049,62 @@ Squad members are derived from:
 ```text
 Designer.home_squad_id
 ```
+
+This still describes only a designer's **Primary Squad** membership. A
+designer may additionally hold **Shared** squad memberships (§8.2.1, §13.1),
+managed from Teams → Squad View rather than here — Master Data → Squads
+continues to manage Primary Squad only (Add member / Manage members below).
+
+## Managing members
+
+Membership is still never stored on the Squad — but it is edited from here,
+rather than only from the Designers tab. Every action below writes
+`Designer.home_squad_id` (or `Squad.lead_designer_id`); nothing introduces a
+second record of who is in a squad, so the member count, the Designers tab,
+Squads, People and Overview all follow the same change without being updated
+separately.
+
+Row actions:
+
+```text
+Edit
+Add member
+Manage members
+Deactivate
+Delete
+```
+
+**Add member** opens a searchable multi-select of Active designers who are not
+already in this squad, each listed with their job title and the squad they are
+in now. Because Home Squad is a single required field (§8.1), every selection is
+a **move** — the dialog names the designer's current squad on their row and
+states the consequence for the actual selection before the user confirms.
+Confirming shows `N designers added to <Squad>`.
+
+**Manage members** lists the squad's current members — avatar, name, job title,
+and a `Squad Lead` badge on the lead. Each member has:
+
+```text
+Make Squad Lead  (or Remove as Squad Lead, for the current lead)
+Move to another squad
+```
+
+There is no *Remove from squad*: a designer cannot exist without a home squad
+(§25), so leaving a squad always means joining another one, and the move step
+requires a destination. `Move to another squad` is unavailable when no other
+Active squad exists.
+
+**Squad Lead protection.** A Squad may have no lead (§8.2), so a lead can be
+moved out — but never silently. Moving the lead of a squad states the impact
+first and, on confirmation, sets that squad's Squad Lead to Unassigned rather
+than leaving it pointing at someone who is no longer a member. This applies in
+both directions: moving this squad's lead away, and adding someone who leads the
+squad they are coming from.
+
+**Member count.** The `N designers` cell in the Squads table opens Manage
+members. Only the count is interactive — the row itself is not clickable. A
+squad with no members shows `0 designers · Add member` instead, matching the
+`No designers · Add` treatment Squads already uses (§14.7).
 
 ---
 
@@ -1907,6 +2168,8 @@ Do not hardcode stakeholder names directly inside project form.
 
 Use `Active` / `Inactive` to retire a stakeholder still connected to historical data — an Inactive stakeholder remains available wherever historical Project data references them. **Delete** is blocked while any Department still names them as its head, or any Project still references them as a department-head snapshot, Product Owner, or Project Admin/PIC.
 
+Same **Verified** badge as Designers (§15), driven by `Profile.stakeholder_id` (§6.1) instead of `Profile.designer_id`.
+
 ---
 
 # 20. Create Project User Flow
@@ -1918,7 +2181,7 @@ Add Project
 
 1. Project Context
         ↓
-2. Timeline & Targets
+2. Timeline & Planning
         ↓
 3. Design Team
         ↓
@@ -1927,39 +2190,68 @@ Add Project
 Create Project
 ```
 
+## Wizard shell (all four steps)
+
+The page is: title + one-line description + `Cancel` (header), the stepper, the
+step's content, and the navigation footer. No step repeats its own name as a
+heading — the stepper already says where the user is.
+
+**Stepper.** Three visually distinct states, so the row is never four equal
+items: completed (check), current (the one filled marker, primary color),
+upcoming (neutral). A step is clickable once it has been reached; steps beyond
+what the entered data supports stay inert, so the stepper cannot skip a
+required field that `Next` would have stopped at. Going backward is always
+allowed.
+
+**Step content.** Each step is a set of named sections rather than one long
+field list. A section states its purpose on the left and holds its controls on
+the right, separated from the next section by a single rule — not by a card
+each. Below ~1024px the two columns stack, section text above controls.
+
+**Footer.** `Back` on the left, `Next` (or `Create Project` / `Save Changes` on
+Review) on the right, pinned to the bottom of the content area so it is not
+something to scroll for on a long step. `Cancel` is not repeated here.
+
+**Validation.** No permanent list of missing fields. Requirements are marked on
+the field (`*` for required, `Optional` where it helps), and a field states its
+own problem under itself once the user has tried to continue past that step.
+`Next` stays enabled and explains rather than sitting dead — pressing it is
+what reveals what is missing.
+
 ---
 
 # 21. Add Project — Step 1: Project Context
 
-Fields:
+Three sections:
 
 ```text
-Project Name *
+Project Details      Project Name *
+                     Epic *              Department *
+                     Description
 
-Epic *
+Ownership            Product Owner *
+                     Project Admin / PIC
+                     Owner Squad *
 
-Department *
-
-Department Head (auto-filled, read-only)
-
-Product Owner *
-
-Project Admin / PIC
-
-Priority *
-
-Status *
-
-Project Health
-
-Timeline Confidence *
-
-Owner Squad *
+Project              Priority *          Status *
+Classification       Timeline Confidence *
 ```
+
+Department Head is shown, auto-filled and read-only, under the Department
+field it is derived from.
 
 All organizational selectors must come from Master Data.
 
-Product Owner and Project Admin can support multiple selections.
+Product Owner and Project Admin can support multiple selections, and both are
+searchable pickers rather than a permanently expanded list of every
+stakeholder: the roster opens from the field, and only the chosen people stay
+on screen, each removable.
+
+**Project Health is not collected when creating a project.** A project with no
+work behind it yet has no evidence of being On Track, At Risk or Blocked, and
+asking for one produces a health value that means nothing. It is first assessed
+from Edit Project (§25), where the field does appear. The stored value of a new
+project is the first Health value; see `docs/DECISIONS.md`.
 
 **Department Head is not independently selected.** It is auto-filled from the selected Department's current `department_head_id` (Department Master Data, §8.3/§17) and displayed read-only. The resulting value is stored on the Project as a snapshot (§8.6) at save time — it does not change later if the Department's head changes.
 
@@ -1975,7 +2267,7 @@ Fields:
 
 ```text
 Start Date *
-End Date *
+Target End Date *   (stored as end_date)
 ```
 
 Both are day-level dates (§8.2), inclusive. After selecting the timeline,
@@ -2073,43 +2365,43 @@ Cross-squad
 
 # 24. Add Project — Step 4: Review
 
-Show summary:
+Read-only. This step exists to catch a wrong Epic or a slipped end date before
+the project is created, so it shows values, not controls.
+
+Summary sections, named after the sections they came from, each with its own
+`Edit` action that returns to the step that owns it:
 
 ```text
-Trade Finance
+Project Details            Edit    Project Name, Epic, Department,
+                                   Department Head, Description
 
-P1
-In Progress
-Committed
+Ownership                  Edit    Product Owner, Project Admin / PIC,
+                                   Owner Squad
 
-Epic
-Trade Finance
+Project Classification     Edit    Priority, Status, Timeline Confidence
+                                   (Project Health only when editing, §21)
 
-Department
-Wholesale Banking
+Timeline & Planning        Edit    Start Date, Target End Date,
+                                   monthly target summary, Weekly Focus
 
-Department Head
-Budi Santoso
+Design Team                Edit    Design Lead, Supporting Designers
+```
 
-Product Owner
-Sarah Wijaya
+Example:
 
-Owner Squad
-Squad A
+```text
+Project Details                                             Edit
 
-Design Lead
-Malik
+Project Name                        Epic
+Trade Finance Platform Revamp       Trade Finance
 
-Supporting
-Sarah
-Raka
-
-Sep — Dec 2026
+Department                          Department Head
+Wholesale Banking                   Budi Santoso
 ```
 
 If no Design Lead was selected, show `Design Lead: Unassigned` instead — this is a valid state, not an error.
 
-Show monthly target summary.
+Show monthly target summary. Weekly Focus is shown only when the project has any.
 
 Primary CTA:
 
@@ -2144,7 +2436,7 @@ Overview
 Timeline
 Projects
 People
-Teams
+Squads
 ```
 
 Example:
@@ -2389,27 +2681,38 @@ Mobile optimization is not required for MVP.
 
 ## 29.1 Filter toolbar (shared across every list screen)
 
-Projects, Timeline, People, Teams, and all five Master Data screens use one
+Projects, Timeline, People, Squads, and all five Master Data screens use one
 shared filter toolbar, so filtering behaves and reads the same everywhere.
 
 Layout, in a single wrapping row:
 
 ```text
-Search   <the screen's own filters>   Clear filters
+<view switcher, if the screen has one>   Search   <the screen's own filters>   Clear filters
 ```
 
-* **Search** sits first and is always the same width. `Cmd/Ctrl+K` focuses it
-  from anywhere on the page. Matching is case-insensitive substring matching on
-  the trimmed query, debounced by 250 ms so the list doesn't re-filter on every
-  keystroke. Which fields a screen searches is listed in that screen's own
-  section.
+A screen with a presentation/view switcher (Projects' Board/List/Table,
+Squads' Table/Squad) renders it on the left of this same row, pinned
+opposite Search/Filters, rather than on a row of its own — one cohesive
+toolbar instead of two stacked controls. At narrower widths the row wraps,
+putting the view switcher above Search/Filters. Screens without a view
+switcher are unaffected.
+
+* **Search** sits first among the filter controls and is always the same
+  width. `Cmd/Ctrl+K` focuses it from anywhere on the page. Matching is
+  case-insensitive substring matching on the trimmed query, debounced by
+  250 ms so the list doesn't re-filter on every keystroke. Which fields a
+  screen searches is listed in that screen's own section.
 * **Filters** are dropdown buttons. Each one names its dimension before a value
   is picked ("Department") and reads `Dimension: Value` after ("Department:
   Wholesale Banking"), so several active filters stay unambiguous at a glance.
   Dropdowns over long lists (squads, departments, epics, designers, design
-  leads) are searchable. Timeline is the exception to the row layout: it is a
-  canvas, not a table, so every dimension collapses into one `Filter` popover
-  and only Search + Filter stay on screen (§14.2).
+  leads) are searchable. If a screen already exposes a comprehensive `Filters`
+  panel, its dimensions are never *also* shown as separate standalone toolbar
+  controls — one entry point per filter, not two. Projects, Timeline, and
+  Squads all collapse into a single `Filters` button this way; every dimension
+  lives in the popover behind it (§14.2, §14.3, §14.7). People and the five
+  Master Data screens have few enough dimensions that each is shown directly,
+  with no popover to hide anything behind.
 * **Clear filters** is the only reset action, appearing at the end of the row
   once anything is active — including a Search query. Projects' Advanced
   Filters panel keeps its own staged Reset/Apply footer, which is separate.
@@ -2560,6 +2863,12 @@ else
 ```
 
 Do not expose Cross-squad as a manually editable checkbox.
+
+This is unrelated to **Shared Squad Membership** (§8.2.1, §13.1): Cross-squad
+above is a fully derived fact about a *project assignment*, never stored;
+Shared Squad Membership is an explicit, stored fact about *squad membership*,
+with no project involved. A designer can be cross-squad on a project without
+being Shared into that project's squad, and vice versa.
 
 ---
 
@@ -2853,6 +3162,9 @@ The MVP is considered successful when an Admin can:
 
 * create project,
 * edit project,
+* switch between Board / List / Table views (§14.3),
+* assign a Design Lead and/or Supporting Designers directly from Board, List, or Table,
+* start a project (To Do → In Progress, gated on §10.3),
 * mark a project complete, put it on hold, cancel it, or reopen it (§10, §25),
 * archive / un-archive a project,
 * delete a project (§25),
@@ -2869,7 +3181,7 @@ The MVP is considered successful when an Admin can:
 * see cross-squad assignments,
 * see project overlap across timeline.
 
-### Teams
+### Squads
 
 * see every squad,
 * identify Squad Lead,
@@ -2892,11 +3204,19 @@ Changing assignment or project data must update all relevant views automatically
 
 # 38. Explicitly Out of Scope
 
-DO NOT implement these features for MVP:
+DO NOT implement these features for MVP. Note on "Kanban" below: every
+occurrence in this list means *task-level* Kanban — turning a project's
+internals (Weekly Focus, a task list inside a project) into a Jira-style
+board of subtasks with per-task status, assignee, and workload. It does not
+mean the *project-level* Board added at §14.3, whose cards are whole
+Projects grouped by Project Status on the existing Projects page, the same
+kind of visibility a status column already gave the old table — not task
+management. See `docs/DECISIONS.md` for why the two are a different feature
+and this line was clarified rather than silently overridden.
 
 ```text
 Task management
-Kanban
+Kanban (task-level — see the note above; does not restrict the Projects Board at §14.3)
 Sprint planning
 Subtasks
 Timesheets

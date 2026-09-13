@@ -11,8 +11,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Check } from "lucide-react"
-import { cn } from "cn"
+import { ArrowRight } from "lucide-react"
 
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
@@ -37,7 +36,6 @@ import type {
   Designer,
   Epic,
   Project,
-  ProjectAssignment,
   ProjectMonthlyTarget,
   ProjectWeeklyFocus,
   Squad,
@@ -46,13 +44,17 @@ import type {
 
 import {
   buildFormStateFromProject,
+  desiredAssignments,
   emptyProjectFormState,
   toPersistableRows,
   toPersistableWeeklyFocus,
   type MonthlyTargetRowState,
+  type ProjectContextErrors,
   type ProjectFormState,
+  type TimelineErrors,
   type WeeklyFocusItemState,
 } from "./project-form-types"
+import { WizardStepper } from "./wizard-stepper"
 import { StepProjectContext } from "./step-project-context"
 import { StepTimelinePlanning } from "./step-timeline-planning"
 import { StepDesignTeam } from "./step-design-team"
@@ -60,6 +62,10 @@ import { StepReview } from "./step-review"
 
 const STEP_LABELS = ["Project Context", "Timeline & Planning", "Design Team", "Review"] as const
 const STEP_COUNT = STEP_LABELS.length
+
+/** One shared identity for "nothing to complain about", so a step component
+ * doesn't re-render on a fresh empty object every keystroke. */
+const NO_ERRORS = {} as const
 
 interface Lookups {
   epics: Epic[]
@@ -84,10 +90,13 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
   )
   const [form, setForm] = useState<ProjectFormState>(() => emptyProjectFormState())
   const [originalProject, setOriginalProject] = useState<Project | null>(null)
-  const [originalAssignments, setOriginalAssignments] = useState<ProjectAssignment[]>([])
   const [originalMonthlyTargets, setOriginalMonthlyTargets] = useState<ProjectMonthlyTarget[]>([])
   const [originalWeeklyFocus, setOriginalWeeklyFocus] = useState<ProjectWeeklyFocus[]>([])
   const [step, setStep] = useState(1)
+  // Steps whose Next has been pressed. Validation messages appear per step
+  // only after the user has tried to leave it — a form that turns red while
+  // it is still being filled in is nagging, not helping (docs/DECISIONS.md).
+  const [attemptedSteps, setAttemptedSteps] = useState<number[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
@@ -120,7 +129,6 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
 
     setForm(buildFormStateFromProject(project, assignments, monthlyTargets, weeklyFocus))
     setOriginalProject(project)
-    setOriginalAssignments(assignments)
     setOriginalMonthlyTargets(monthlyTargets)
     setOriginalWeeklyFocus(weeklyFocus)
     setLoadStatus("ready")
@@ -212,34 +220,41 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
     setForm((current) => ({ ...current, team: { ...current.team, supportDesignerIds: ids } }))
   }
 
-  const step1Valid =
-    form.context.name.trim() !== "" &&
-    form.context.epicId !== "" &&
-    form.context.departmentId !== "" &&
-    form.context.productOwnerIds.length > 0 &&
-    form.context.ownerSquadId !== ""
+  // One message per required field, worded for the field it sits under rather
+  // than listed together above the buttons: "Project name is required" next to
+  // the empty input says more than a five-item summary at the bottom of a form
+  // the user has to scroll back up through (docs/DECISIONS.md).
+  const contextErrors: ProjectContextErrors = {}
+  if (form.context.name.trim() === "") contextErrors.name = "Project name is required."
+  if (form.context.epicId === "") contextErrors.epicId = "Select an epic."
+  if (form.context.departmentId === "") contextErrors.departmentId = "Select a department."
+  if (form.context.productOwnerIds.length === 0)
+    contextErrors.productOwnerIds = "Select at least one product owner."
+  if (form.context.ownerSquadId === "") contextErrors.ownerSquadId = "Select the owning squad."
 
-  const step2Valid =
-    form.startDate !== "" && form.endDate !== "" && form.startDate <= form.endDate
+  const timelineErrors: TimelineErrors = {}
+  if (form.startDate === "") timelineErrors.startDate = "Start date is required."
+  if (form.endDate === "") timelineErrors.endDate = "Target end date is required."
+  else if (form.startDate !== "" && form.startDate > form.endDate)
+    timelineErrors.endDate = "Target end date must be on or after the start date."
 
-  const canGoNext = step === 1 ? step1Valid : step === 2 ? step2Valid : true
+  const step1Valid = Object.keys(contextErrors).length === 0
+  const step2Valid = Object.keys(timelineErrors).length === 0
+  const stepIsValid = step === 1 ? step1Valid : step === 2 ? step2Valid : true
+  const showErrors = attemptedSteps.includes(step)
 
-  // Names every still-missing required field so a disabled Next button never
-  // looks simply dead (antislop-human: a disabled control needs a reason).
-  const missingFields: string[] = []
-  if (step === 1) {
-    if (form.context.name.trim() === "") missingFields.push("Project Name")
-    if (form.context.epicId === "") missingFields.push("Epic")
-    if (form.context.departmentId === "") missingFields.push("Department")
-    if (form.context.productOwnerIds.length === 0) missingFields.push("Product Owner")
-    if (form.context.ownerSquadId === "") missingFields.push("Owner Squad")
-  } else if (step === 2) {
-    if (form.startDate === "" || form.endDate === "") missingFields.push("Start and end date")
-    else if (form.startDate > form.endDate) missingFields.push("An end date on or after the start date")
-  }
+  // Backward is always allowed; forward only as far as what has actually been
+  // entered supports, so the stepper can never jump past a required field that
+  // Next would have stopped at.
+  const maxReachable = Math.max(step, step1Valid ? (step2Valid ? STEP_COUNT : 2) : 1)
 
   function goNext() {
-    if (!canGoNext) return
+    if (!stepIsValid) {
+      // Next stays live rather than going dead with nothing to explain it:
+      // pressing it is what reveals which fields are still missing.
+      setAttemptedSteps((current) => (current.includes(step) ? current : [...current, step]))
+      return
+    }
     setStep((current) => Math.min(STEP_COUNT, current + 1))
   }
 
@@ -294,20 +309,7 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
         updated_at: now,
       })
 
-      if (form.team.leadDesignerId) {
-        projectAssignmentRepository.create({
-          project_id: project.id,
-          designer_id: form.team.leadDesignerId,
-          project_role: "Lead",
-        })
-      }
-      for (const designerId of form.team.supportDesignerIds) {
-        projectAssignmentRepository.create({
-          project_id: project.id,
-          designer_id: designerId,
-          project_role: "Support",
-        })
-      }
+      projectAssignmentRepository.reconcile(project.id, desiredAssignments(form.team))
       for (const row of finalRows) {
         projectMonthlyTargetRepository.create({ project_id: project.id, ...row })
       }
@@ -328,31 +330,10 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
     if (!projectId) return
     projectRepository.update(projectId, { ...basePayload, updated_at: now })
 
-    // Reconcile ProjectAssignment rows against what was originally loaded
-    // (nothing here has been persisted yet, so `originalAssignments` is
-    // still an accurate "before" snapshot to diff against).
-    const desiredAssignments = [
-      ...(form.team.leadDesignerId ? [{ designerId: form.team.leadDesignerId, role: "Lead" as const }] : []),
-      ...form.team.supportDesignerIds.map((id) => ({ designerId: id, role: "Support" as const })),
-    ]
-    for (const assignment of originalAssignments) {
-      const stillWanted = desiredAssignments.some(
-        (desired) => desired.designerId === assignment.designer_id && desired.role === assignment.project_role,
-      )
-      if (!stillWanted) projectAssignmentRepository.remove(assignment.id)
-    }
-    for (const desired of desiredAssignments) {
-      const alreadyExists = originalAssignments.some(
-        (assignment) => assignment.designer_id === desired.designerId && assignment.project_role === desired.role,
-      )
-      if (!alreadyExists) {
-        projectAssignmentRepository.create({
-          project_id: projectId,
-          designer_id: desired.designerId,
-          project_role: desired.role,
-        })
-      }
-    }
+    // ProjectAssignment rows are reconciled against the desired Lead+Support
+    // set the same way on create and edit — see desiredAssignments() in
+    // project-form-types.ts.
+    projectAssignmentRepository.reconcile(projectId, desiredAssignments(form.team))
 
     // Reconcile ProjectMonthlyTarget rows the same way — diffed against the
     // originally-loaded rows, one per (project_id, month).
@@ -397,7 +378,12 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
   }
 
   return (
-    <div className="space-y-6">
+    // -mb-6 lives on this static wrapper, not on the sticky footer below: a
+    // sticky element with its own negative bottom margin gets its scrollable
+    // overflow miscomputed in Chromium, which let this page be scrolled well
+    // past its actual content. A plain block's negative margin doesn't have
+    // that failure mode, so the bottom-padding cancellation happens here.
+    <div className="-mb-6 space-y-6">
       <PageHeader
         title={mode === "create" ? "Add Project" : `Edit ${originalProject?.name ?? "Project"}`}
         description={
@@ -412,40 +398,18 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
         }
       />
 
-      <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-sm">
-        {STEP_LABELS.map((label, index) => {
-          const stepNumber = index + 1
-          const isCurrent = stepNumber === step
-          const isComplete = stepNumber < step
-          return (
-            <li key={label} className="flex items-center gap-1.5">
-              {index > 0 ? <span className="text-muted-foreground/50">/</span> : null}
-              <span
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full px-2.5 py-1",
-                  isCurrent ? "bg-primary font-medium text-primary-foreground" : "text-muted-foreground",
-                )}
-              >
-                <span
-                  className={cn(
-                    "flex size-4 items-center justify-center rounded-full text-[10px]",
-                    isCurrent
-                      ? "bg-primary-foreground text-primary"
-                      : isComplete
-                        ? "bg-foreground/10 text-foreground"
-                        : "border border-current",
-                  )}
-                >
-                  {isComplete ? <Check className="size-3" /> : stepNumber}
-                </span>
-                {label}
-              </span>
-            </li>
-          )
-        })}
-      </ol>
+      <WizardStepper
+        steps={STEP_LABELS}
+        current={step}
+        maxReachable={maxReachable}
+        onStepSelect={setStep}
+      />
 
-      <ContentSection title={`Step ${step} of ${STEP_COUNT}: ${STEP_LABELS[step - 1]}`}>
+      {/* No "Step 2 of 4" heading: the stepper above already says where the
+          user is, and the sections inside carry their own titles. The card
+          keeps only its horizontal padding — each section owns its vertical
+          rhythm so the rules between them run edge to edge. */}
+      <ContentSection bodyClassName="px-6 py-1">
         {step === 1 ? (
           <StepProjectContext
             value={form.context}
@@ -454,6 +418,8 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
             departments={lookups.departments}
             squads={lookups.squads}
             stakeholders={lookups.stakeholders}
+            errors={showErrors ? contextErrors : NO_ERRORS}
+            showHealth={mode === "edit"}
           />
         ) : null}
         {step === 2 ? (
@@ -462,6 +428,7 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
             endDate={form.endDate}
             monthlyRows={form.monthlyTargets}
             weeklyFocus={form.weeklyFocus}
+            errors={showErrors ? timelineErrors : NO_ERRORS}
             onRangeCommit={handleRangeCommit}
             onMonthlyRowFieldChange={handleMonthlyRowFieldChange}
             onWeeklyFocusAdd={handleWeeklyFocusAdd}
@@ -488,33 +455,41 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
             stakeholders={lookups.stakeholders}
             designers={lookups.designers}
             departmentHeadName={departmentHeadName}
+            showHealth={mode === "edit"}
+            onEditStep={setStep}
           />
         ) : null}
       </ContentSection>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          {step > 1 ? (
-            <Button type="button" variant="outline" onClick={goBack}>
-              Back
-            </Button>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          {!canGoNext && missingFields.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Required to continue: {missingFields.join(", ")}
-            </p>
-          ) : null}
-          {step < STEP_COUNT ? (
-            <Button type="button" onClick={goNext} disabled={!canGoNext}>
-              Next
-            </Button>
-          ) : (
-            <Button type="button" onClick={handleSubmit} disabled={isSubmitting}>
-              {mode === "create" ? "Create Project" : "Save Changes"}
-            </Button>
-          )}
+      {/* Pinned to the bottom of the scrolling content area: Step 2 with a
+          year-long timeline is several screens tall, and Next should not be
+          something you scroll to find. Bleeds through the page padding so the
+          rule spans the full width. Cancel is not repeated here — it is in the
+          page header (PRD §29). */}
+      <div className="sticky bottom-0 z-10 -mx-6 border-t border-border bg-card px-6 py-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            {step > 1 ? (
+              <Button type="button" variant="outline" onClick={goBack}>
+                Back
+              </Button>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {showErrors && !stepIsValid ? (
+              <p className="text-sm text-destructive">Fill in the highlighted fields to continue.</p>
+            ) : null}
+            {step < STEP_COUNT ? (
+              <Button type="button" onClick={goNext}>
+                Next
+                <ArrowRight />
+              </Button>
+            ) : (
+              <Button type="button" onClick={handleSubmit} disabled={isSubmitting}>
+                {mode === "create" ? "Create Project" : "Save Changes"}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>

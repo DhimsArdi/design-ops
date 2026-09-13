@@ -27,14 +27,8 @@ import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
 import { PriorityBadge } from "@/components/shared/priority-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table } from "@/components/motion/table"
+import type { TableColumn } from "@/components/motion/table"
 import {
   MonthRangeTrack,
   addMonths,
@@ -175,6 +169,48 @@ export function PersonDetailView({ designerId }: PersonDetailViewProps) {
     [data]
   )
 
+  const projectColumns = useMemo<TableColumn<CurrentProjectRow>[]>(
+    () => [
+      {
+        key: "project",
+        header: "Project",
+        cell: (row) => (
+          <Link
+            href={`/projects/${row.project.id}`}
+            className="font-medium text-foreground hover:underline"
+          >
+            {row.project.name}
+          </Link>
+        ),
+      },
+      {
+        key: "priority",
+        header: "Priority",
+        cell: (row) => <PriorityBadge priority={row.project.priority} />,
+      },
+      {
+        key: "owner_squad",
+        header: "Owner Squad",
+        cell: (row) => <span className="text-muted-foreground">{row.ownerSquad?.name ?? "–"}</span>,
+      },
+      {
+        key: "role",
+        header: "Role",
+        cell: (row) => (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline">{row.assignment.project_role}</Badge>
+            {row.crossSquad ? (
+              <Badge variant="outline" className="text-xs">
+                Cross-squad
+              </Badge>
+            ) : null}
+          </div>
+        ),
+      },
+    ],
+    []
+  )
+
   if (data === undefined) {
     return <p className="py-10 text-center text-sm text-muted-foreground">Loading person…</p>
   }
@@ -243,46 +279,12 @@ export function PersonDetailView({ designerId }: PersonDetailViewProps) {
             description="This designer has no active or upcoming project assignments."
           />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Project</TableHead>
-                <TableHead>Priority</TableHead>
-                <TableHead>Owner Squad</TableHead>
-                <TableHead>Role</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {currentProjects.map((row) => (
-                <TableRow key={row.assignment.id}>
-                  <TableCell>
-                    <Link
-                      href={`/projects/${row.project.id}`}
-                      className="font-medium text-foreground hover:underline"
-                    >
-                      {row.project.name}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <PriorityBadge priority={row.project.priority} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {row.ownerSquad?.name ?? "–"}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge variant="outline">{row.assignment.project_role}</Badge>
-                      {row.crossSquad ? (
-                        <Badge variant="outline" className="text-xs">
-                          Cross-squad
-                        </Badge>
-                      ) : null}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <Table
+            data={currentProjects}
+            columns={projectColumns}
+            getRowId={(row) => row.assignment.id}
+            height={Math.min(560, (currentProjects.length + 1) * 48)}
+          />
         )}
       </ContentSection>
 

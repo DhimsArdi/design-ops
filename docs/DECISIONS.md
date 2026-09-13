@@ -44,19 +44,25 @@ picked as a Squad Lead without a fake "Me" row existing anywhere, and why the
 pickers needed no new data source — the user is in those lists because they are
 a designer, not because they were appended to them.
 
-## Name and job title are written to both rows, and read from the designer first
+## Name is written to the linked row too, and read from it first
 
-`profiles` has to hold `full_name`: an account with no designer record still has
-a name. The linked `designers` row has to hold it too, because that row is what
-every planning screen renders. So saving Settings → Profile writes both, and
-`useCurrentUser` reads the designer's copy first.
+`profiles` has to hold `full_name`: an account with no designer or stakeholder
+record still has a name. The linked row has to hold it too, because that row is
+what every planning screen renders. So saving Settings → Profile writes both,
+and `useCurrentUser` reads the designer's copy first.
 
 The alternative — one authoritative row chosen by whether a link exists — has no
 duplication at all, and was rejected for being harder to reason about at the
 call site than the staleness it avoids. The mirror is one-way (Settings →
-Designer) and lives in exactly one function, `profileRepository.saveIdentity`.
-Renaming someone in Master Data leaves `profiles.full_name` behind, which
-nothing reads while a link exists.
+Designer/Stakeholder) and lives in exactly one function,
+`profileRepository.saveIdentity`. Renaming someone in Master Data leaves
+`profiles.full_name` behind, which nothing reads while a link exists.
+
+Job title used to be part of this mirror (`profiles.job_title` →
+`designers.job_title`). It no longer is — see "Department replaces Job title;
+Department Head becomes a second linkable person type" below —
+`Designer.job_title` and `Stakeholder.title` are now edited only in their own
+Master Data page.
 
 ## `system_role` is protected by a column GRANT, not by the UI
 
@@ -634,3 +640,725 @@ No new dependency and no new primitive: `react-day-picker`, `ui/calendar.tsx` an
 **Implementation note:** the `min`/`max` bounds compile to an **array** of matchers (`[{ before }, { after }]`), never a single `{ before, after }` object — the combined form means "days *between* the two" in react-day-picker, which is the exact inverse of a min/max bound.
 
 **Verified:** `tsc --noEmit` and `next build` clean; no `type="date"` remains in `src/`.
+
+## Squad membership is editable from Master Data → Squads, and "remove from squad" is a move
+
+**Decision:** Master Data → Squads gained `Add member` and `Manage members`,
+replacing the read-only `View members` popup. Both write
+`Designer.home_squad_id`; neither introduces a squad-membership record of any
+kind. The per-member menu offers `Move to another squad`, never `Remove from
+squad`, and the move step requires a destination squad.
+
+**Why:** The request asked for a `Remove from squad` action defined as
+`designer.homeSquad = null`, and that state does not exist in this product.
+`designers.home_squad_id` is `not null` in `supabase/schema.sql`, non-nullable
+in `src/lib/domain/types.ts`, and PRD §25 states the rule it enforces outright —
+"a designer cannot exist without a home squad" — which is also why Squad has no
+`Delete anyway` path while Designer does. Making it nullable would have been a
+migration plus an "Unassigned" branch in every view that reads Home Squad
+(Designers, People, Teams, Overview, the Projects cross-squad filter), i.e. a
+data-model change to the org structure, made in passing during a UI task. The
+product question the action answers — "get this person out of my squad" — is
+fully served by a move, and a move is the only outcome the schema can
+represent. If an unassigned bench is genuinely wanted later, it should be
+decided as its own change to §4.3/§25, not inherited from a dialog.
+
+**Squad Lead is a different case and got the opposite answer.**
+`squads.lead_designer_id` *is* nullable ("a squad can exist with no lead
+assigned yet", §8.2), so the requested "allow Squad Lead = Unassigned" is
+honoured: moving a lead out of the squad they lead warns first, then clears that
+squad's lead. Nothing in the schema requires a lead to be a member, but a lead
+who has left reads as stale data rather than as a decision, so the move clears
+it instead of leaving it dangling.
+
+**Steps, not stacked modals.** Manage members is one `Dialog` with three
+views — the member list, the move step, and the add step — each swapped in
+place, with `Back` returning to the list. Base UI does support nested dialogs,
+but a dialog on a dialog means two focus traps and two dismissals for one
+decision; it also suppresses the child's backdrop, so the second surface lands
+directly on the first at the same size and reads as a redraw anyway. Swapping
+in place says the same thing with one focus trap and one Escape key, and it is
+the pattern the move step needed regardless.
+
+That is also where confirmation lives. The lead warning renders inline above
+the destination picker, and in Add members the lead-impact callout appears as
+the selection is made — so the consequence is on screen *while* the user is
+choosing, not in a second dialog after they have committed. The footer button
+is the confirmation.
+
+`AddSquadMembersPanel` is therefore exported alongside `AddSquadMembersDialog`:
+the panel is the whole thing minus the `Dialog` shell, so the step inside Manage
+members and the standalone dialog are the same component, not two that have to
+be kept in agreement.
+
+**Why the count is a link and the row is not.** Clicking `3 designers` opens
+Manage members. The row was left non-clickable on purpose — Squad Name, Squad
+Lead and Status all mean something else, and a whole-row target would make the
+squad name's own link ambiguous.
+
+**Implementation notes:**
+
+- `AssignDesignersDialog` (Teams) was promoted to
+  `src/components/shared/add-squad-members-dialog.tsx` and is now used by both
+  screens, rather than Squads growing a near-copy of it. Per `CLAUDE.md`'s
+  "prefer existing reusable components over creating duplicates".
+- Both dialogs take a squad **id** and look the row up from the live `squads`
+  list on every render. A captured `Squad` object would have left the
+  `Squad Lead` badge showing the previous lead immediately after
+  `Make Squad Lead` — the write lands in the cache, but a snapshot taken at
+  click time never hears about it.
+- `designerRepository.setHomeSquad(ids, squadId)` was added so a multi-person
+  add is one cache write and one `PATCH … in(id, …)`, instead of the previous
+  loop of N independent optimistic updates that could half-apply.
+- No spinner on submit. Repository writes are synchronous and optimistic, so a
+  loading state would be theatre; `Add members` disables on click purely to stop
+  a double submit landing twice before the dialog unmounts.
+
+**Verified:** `tsc --noEmit`, `eslint src` and `next build` clean; the
+`/master-data/squads` route compiles and serves 200 in dev.
+
+## The Add/Edit Project wizard is a sectioned settings form, not one field list
+
+Every step used to be a single stack of labelled controls inside a card, with a
+`Step 1 of 4: Project Context` heading repeating what the stepper above it
+already said. At thirteen fields, Step 1 read as one administration form to get
+through rather than three questions to answer.
+
+Each step is now a set of named sections: the section's purpose on the left
+(220px), its controls on the right (capped at ~768px so a field never stretches
+to a 1440px reading width), one hair rule between sections. `Ownership / Define
+who owns the project, and which squad is responsible for it.` answers the
+question a bare `Product Owner *` label leaves open, without a line of helper
+text under every input.
+
+Not a card per section, deliberately (§29): the step is already inside one
+surface, and five nested boxes draw borders where the page needs rhythm. The
+two columns stack below ~1024px — at the shell's 768px floor a 220px
+description column leaves the controls cramped.
+
+`WizardSection` / `WizardField` / `WizardFieldRow` live beside the steps in
+`src/app/projects/_components/wizard-section.tsx` rather than in
+`components/shared`: they are the wizard's layout, and Settings already has its
+own `SettingsSection` for a single-column page. If a third screen wants this
+pattern, that is when it moves.
+
+## Project Health is not asked for when creating a project
+
+Health is an assessment of a project that is already running. At creation there
+is nothing to assess, so the field is shown only in edit mode (§21), and Review
+summarizes it only when it was asked for.
+
+The column is `not null` with three allowed values (`supabase/schema.sql`), so
+a new row still carries the first one. A fourth "Not assessed" value would be
+the honest answer, and it was not added: it is a schema migration plus every
+place health is read — Overview's health breakdown, the Projects and Timeline
+filters, `HealthBadge`, the seed data — which is a product change to §11, not a
+form change. Flagged as a follow-up rather than smuggled in with a layout
+refactor.
+
+## Validation appears per field on attempt, not as a standing list of what is missing
+
+The footer used to carry `Required to continue: Project Name, Epic, Department,
+Product Owner, Owner Squad` for as long as the step was incomplete — visible
+from the moment the form opened, which is before the user has done anything
+wrong.
+
+Now each field states its own problem under itself, and only once `Next` has
+been pressed on that step. `Next` stays enabled and reveals the errors rather
+than sitting disabled: a dead button with no explanation is the thing the
+standing list existed to avoid, and this answers the same need at the field
+that has the problem. The footer adds one line — `Fill in the highlighted
+fields to continue.` — because the first red field may be scrolled off the top.
+
+Errors clear as fields are filled, so the step never stays red once it is
+valid.
+
+## Two multi-select controls, chosen by where the list lives
+
+`MultiSelectChecklist` is an always-open bordered list. It stays the right
+control inside a dialog, where the list *is* the content (Add squad members).
+
+On a form page it is wrong: Product Owner, Project Admin / PIC and Supporting
+Designers each put every stakeholder or designer on screen permanently, so one
+section scrolled like a directory. `SearchableMultiSelect` puts the roster
+behind a trigger and keeps only the chosen rows visible, each removable. Its
+shape is `PersonSelect`'s — trigger, search box, checkmark list — so it reads as
+the control the app already uses; the one difference is that the popover stays
+open while ticking, because picking three people should not mean opening the
+same list three times.
+
+## Projects gained a Board/List view — why that is not the "Kanban" §38 excludes
+
+`docs/PRD.MD` §38 has listed `Kanban` as out of scope since MVP planning, and
+every other occurrence of the word in the PRD is specifically about
+*task-level* Kanban: turning Weekly Focus, or a project's internals, into a
+Jira-style board of subtasks with per-task status, assignee, story points,
+and workload (§8.9, §14.2). None of that changed — Weekly Focus is still a
+short planning note, not a task list.
+
+The Board added to the Projects page (§14.3) is a different feature at a
+different altitude: its cards are whole Projects, its columns are Project
+Status, and it lives on the screen that already had a Status column in its
+table. Grouping records by status is the same visibility the old table
+already gave a Status cell — this only changes the projection, not what is
+tracked. It is exactly as much "task management" as the table it replaces.
+
+**Decision:** proceed with the project-level Board, and amend §38's Kanban
+line to say so explicitly, rather than read the literal word as blocking a
+feature it was never written to describe. This was an explicit instruction
+from the person requesting the work, which outranks the PRD per this
+repo's own precedence order (`CLAUDE.md`) — but a scope call like this gets
+written down here rather than silently overridden, the same discipline
+every other PRD deviation in this file follows.
+
+## Project status stays a relabel, not a rename — no migration
+
+The Projects revamp's board columns are "To Do / In Progress / Done", but
+the stored `ProjectStatus` enum is untouched: `Planning`, `In Progress`,
+`On Hold`, `Completed`, `Cancelled` (`src/lib/domain/enums.ts`) still back
+every filter, selector, and Supabase column exactly as before.
+
+`PROJECT_STATUS_LABELS` (same file) is the one new thing: a display-label
+map consumed by `StatusBadge` and the Status filter's option labels —
+`Planning` reads "To Do", `Completed` reads "Done", the other three keep
+their own name. Every other file that used to render `project.status`
+directly now renders through `StatusBadge`, so the relabeling is visible
+everywhere status text appears (Overview, Timeline, People, Projects)
+without any of them knowing about it.
+
+**Decision:** relabel only. Actually renaming the enum values (`Planning`
+→ `"To Do"` etc.) was the more literal reading of the originating spec, but
+it is a real Supabase migration touching a production table plus every one
+of the ~10 files that pattern-match on the literal strings — for a change
+that is purely cosmetic ("what do we call this status"), that risk buys
+nothing a label map doesn't already buy more cheaply and more reversibly.
+
+## The Board's lifecycle transitions are an explicit matrix, not "drop it anywhere"
+
+Only three moves are legal on the Board, whether by drag or by the card's
+own button:
+
+```text
+Planning ("To Do")  -> In Progress    (gated: at least one designer assigned)
+In Progress         -> Completed      (opens the existing "Mark as complete" flow)
+Completed ("Done")  -> In Progress    (reopen)
+```
+
+`Planning -> Completed` direct and `Completed -> Planning` direct are both
+rejected (a toast explains why, nothing is written) — both would let a
+project skip or erase the "someone actually worked on this" state a
+day-to-day operational board exists to represent. There is also no
+in-column manual reordering: `Project` has no `order` column, and nothing
+in the originating spec asked for one, so dragging only ever changes a
+card's status, never its position within a column.
+
+Every legal transition has a non-drag equivalent on the card itself (Start
+project / Mark done / Reopen) — drag is one of two ways to make the move,
+never the only one, per the existing accessibility rule that drag-and-drop
+actions need a non-drag alternative (§29).
+
+`@dnd-kit/core` + `@dnd-kit/utilities` were added for the drag interaction
+(no drag library existed in this repo before). `@dnd-kit/sortable` was
+deliberately left out: it exists for in-list reordering, which the Board
+doesn't do, so pulling it in would be a dependency for a capability nothing
+uses. The drag itself is exactly as risky as Timeline's existing
+drag-to-reschedule, which already writes straight to a Project's date
+fields through the same synchronous, optimistic repository layer
+(`projectRepository.update`) — this is the same mechanism applied to
+`status` instead of `start_date`/`end_date`, not a new pattern.
+
+## `On Hold` and `Cancelled` projects are never a Board column, but are never fully hidden either
+
+The Board's three columns are a deliberately fixed, small set (§6.1 of the
+originating spec explicitly says not to add more workflow columns). `On
+Hold` and `Cancelled` projects are real, and a Board that silently dropped
+them from view would make "where did that project go" a real support
+question.
+
+**Decision:** a compact secondary strip renders above the three columns
+whenever On Hold or Cancelled projects exist in the current filtered set —
+counts only, each linking into Table/List pre-filtered to that status. The
+page's Status filter also stays visible on Board (unlike the old Active/
+Completed tabs, which hid the granular Status control outside "All") —
+Board's fixed column scope and the Status filter are independent controls
+now, not one gating the other.
+
+## Two different "no designer" concepts, kept separate and separately named
+
+The Board's "Start project" gate and its Needs Allocation quick filter both
+check `canStartProject()` (`src/lib/selectors/projectSelectors.ts`): no
+Lead **and** no Support assignment at all. This is a different question
+from the pre-existing `designLead === UNASSIGNED_DESIGN_LEAD` filter
+(Lead-only), which already had a name, a sentinel, and a consumer —
+Overview's "Unassigned Projects" KPI links to `?designLead=unassigned`
+expecting exactly the Lead-only meaning.
+
+Reusing "Unassigned" as a label for both would make one word mean two
+different things depending on which control showed it. So: the Board/List/
+Table quick filter is **Needs Allocation** (`needsAllocation` on
+`ProjectFilters`, matching `!canStartProject`), and the existing Lead-only
+filter's option label was tightened from the bare "Unassigned" to **"No
+Design Lead"** — both now name what they actually check, and a project with
+a Support designer but no Lead correctly matches one but not the other.
+
+## Assignment reconciliation lives once, in the repository, not once per caller
+
+Setting a project's Lead+Support roster used to be implemented twice:
+inline in the Add/Edit Project wizard's submit (a full diff against
+originally-loaded rows) and inline in `AssignLeadControl`'s single-field
+Lead edit (remove-old/promote-or-create-new). The Board's new "Assign
+design team" dialog would have been a third copy of the same diffing logic.
+
+**Decision:** `projectAssignmentRepository.reconcile(projectId, desired)`
+(alongside `create`/`update`/`remove`, the same repository already owns
+this entity's writes) takes a project's whole desired Lead+Support roster
+and does the add/remove diffing once. The wizard, `AssignLeadControl`, and
+the new `AssignTeamDialog` all call it instead of each rolling their own —
+matching the precedent `designerRepository.setHomeSquad` already set for a
+bulk relationship-write living in the repository rather than at each call
+site.
+
+## Department replaces Job title; Department Head becomes a second linkable person type
+
+Two requests drove this at once: an account should be able to self-assign as
+Project Design Lead without a separate Master Data step, and a business-side
+stakeholder (a Department Head, no design background) should get an account
+too — one that shows up in Master Data → Stakeholders, never → Designers.
+
+**Job title, gone from Profile.** `profiles.job_title` was free text, was
+mirrored one-way onto the linked Designer, and nothing else read it.
+`Designer.job_title` already exists and is already the value every planning
+screen renders — Profile carrying a second, ignorable copy was never load-
+bearing, it was just a field. It is replaced with `department_id`, a
+structured pick from existing Master Data (Departments), because the new
+Department Head path needs exactly that value to create a Stakeholder
+(`Stakeholder.department_id` is required) — the same field earns its keep
+twice instead of once. `supabase/schema.sql`'s own header promises `profiles`
+maps 1:1 onto `src/lib/domain/types.ts`; a column the app no longer reads or
+writes would break that, so the column is dropped
+(`supabase/migrations/003_department_head_profiles.sql`), not just orphaned.
+
+**"Department Head" added to `design_role`, not to a new axis.** It reuses the
+exact string already used by `stakeholder_type` (`docs/PRD.MD` §8.5) —
+deliberately, since it names the same concept. Every other `design_role` value
+means "this account is a Designer"; this one value means "this account is a
+Stakeholder" instead. That is inconsistent on its face (one enum, two
+different kinds of "what you link to") and was chosen anyway over adding a
+second, parallel "account type" field: a person picking their own role in
+Settings does not think in terms of the app's join tables, and a Department
+Head choosing "Department Head" from the same list they'd otherwise choose
+"Design Lead" from is the natural action. The inconsistency is contained to
+one `isDepartmentHeadRole` check in the Profile page and the two symmetric FK
+columns below it — it never leaks into any other screen.
+
+**Two nullable, mutually-exclusive link columns, not one polymorphic one.**
+`profiles.designer_id` already existed; `profiles.stakeholder_id` is added
+alongside it rather than replacing it with something like
+`(person_type, person_id)`. Postgres can enforce "unique per table" on two
+plain FK columns (`designer_id unique`, `stakeholder_id unique`) for free —
+a single polymorphic column loses the FK entirely (it can't reference two
+tables) and would move that uniqueness/referential-integrity guarantee into
+application code that today doesn't need to carry it. The application-level
+invariant this trades in return — at most one of the two columns is ever
+non-null at a time — is enforced in exactly one place, the Profile page's
+submit handler, the same way `ProjectAssignment`'s "at most one Lead per
+project" is a partial unique index plus one reconciling function rather than
+a type that makes the illegal state unrepresentable.
+
+**Switching roles across the Designer/Stakeholder boundary reuses the Delete
+guard, not a new one.** Master Data already blocks deleting a Designer or
+Stakeholder that is still referenced (`getDesignerUsage`/
+`getStakeholderUsage`, behind `DeleteEntityDialog`'s blockers), with a
+"delete anyway" escape hatch. Changing your own `design_role` away from
+Designer (or away from Department Head) removes the record that was standing
+in for "you" in that table — the same action as its own Delete, just
+triggered from a dropdown instead of a menu item. It uses the same two usage
+selectors as the guard, but intentionally has **no** "do it anyway" escape
+hatch the way Master Data's Delete does: Master Data's force-delete is a
+deliberate admin action on someone else's record with a confirmation dialog
+spelling out the consequence; here it would be one dropdown change on your
+own profile silently orphaning a squad's lead or a project's assignments. If
+that block ever proves too strict in practice, the fix is to reassign the
+squad/project first, not to add a silent force-path to a settings form.
+
+**Creating the linked record happens inline in Settings, not by sending the
+user to Master Data first — and it is always opt-in, never required by the
+role choice itself.** A Designer requires a Home Squad (`home_squad_id not
+null`); a self-provisioning flow can't manufacture one, so Settings asks for it
+right there, once, only when needed (no existing link, and the chosen role
+needs one). A Stakeholder only requires a Department, which Settings already
+collects for its own sake — so that side needs no extra field at all, the
+create action just becomes available the moment a Department is chosen.
+
+Choosing "Department Head" — or any Designer-type role — never *blocks* Save
+on picking a department or a squad. Not every account belongs to a squad yet
+(a brand-new hire, someone between squads) or knows their department on day
+one, and the underlying record — Designer, Stakeholder — is optional in the
+data model regardless ("an account with no person record is still a complete,
+working account"). Making role selection hostage to an org-chart detail would
+contradict that. So the squad/department picker is just deferred: leave it
+blank and `design_role` still saves; come back later once it's known, pick it,
+and that save is what creates and links the record. This mirrors the "Team
+profile" link itself, which has always been optional in exactly the same way.
+
+Both creates are deferred to the same `Save changes` submit as everything else
+on the page (`docs/DECISIONS.md` "Settings writes are awaited"), rather than
+firing immediately when a squad/department is picked — one save, one moment
+where the account's identity either fully
+updates or fully doesn't.
+
+## `AvatarGroup` — a new shared component, because none existed
+
+`PersonAvatar` (`src/components/shared/person-avatar.tsx`) is single-avatar
+only; nothing in `components/shared` stacked several. The Projects revamp
+needed one for Board cards, List rows, and Table's new Designers column, so
+`src/components/shared/avatar-group.tsx` was added — built on the
+`AvatarGroup`/`AvatarGroupCount` primitives already shipped in
+`components/ui/avatar.tsx` (present, but unused anywhere, before this),
+the same way `PersonAvatar` itself is a thin layer over the base `Avatar`
+primitives. No new visual system — just the overlap/ring/count styling
+those primitives already carry, wired up to a list of people.
+
+## Onboarding is a data-driven gate inside DataProvider, not a route
+
+A newly-invited account landing with no Design role used to just reach the
+app in that state — nothing prompted them to finish their profile, and
+Master Data would quietly gain a person with an empty identity. The fix asked
+for was a first-login screen that requires it before anything else is usable.
+
+**No `/onboarding` route, no redirect.** `AppFrame`/`DataProvider` already sit
+in front of every route and already render something else entirely in place
+of `children` for one state (`phase.kind === "signed-out"` → `<LoginView />`).
+Onboarding is the same technique for a second state: `OnboardingGate`, a small
+component inside `DataProvider`, calls `useCurrentUser()` and renders
+`<OnboardingView />` instead of `children` whenever `needsOnboarding(profile)`
+is true. There is nothing to navigate to or away from, so there's no
+redirect flash, no "wrong URL" to defend against, and no separate
+`has_onboarded` column to keep in sync with reality — the same
+`profile.design_role` that already means something (§6.1) is the entire
+condition, and it clears itself the instant that field is saved because
+`useCurrentUser` reads the same reactive cache everywhere else in the app
+does.
+
+**The gate reuses Settings → Profile, it does not fork it.** The two are the
+same operation — "give this account a name, a department, a design role, and
+optionally a linked person record" — in two different frames (a full Settings
+page with a persistent Save button; a one-time full-screen form with a
+Continue button). Before this, Settings → Profile owned that logic inline.
+It's now `src/lib/hooks/use-profile-identity-form.ts` (state + validation +
+the create/drop/usage-guard submit logic from the previous decision above) plus
+two presentational components, `ProfileIdentityFields` and `TeamProfileFields`
+(`src/components/shared/`), that both surfaces render identically. The one
+behavioral difference — Onboarding cannot be skipped with Design role left
+"Not set" — is a single `requireDesignRole` flag the hook takes, not a
+parallel copy of the validation. `SettingsSection` moved from
+`src/app/settings/_components/` to `src/components/shared/` in the same
+change, since it's no longer Settings-only and the underscore-folder
+convention marks it private to that route otherwise.
+
+**Department and the Designer/Stakeholder link were initially left optional on
+this screen too, then partly reversed** (see "Onboarding requires a linked
+Designer record for designer roles" below) — a real invite went through
+onboarding as a designer-type role, skipped the (fully optional) Home Squad
+field, and never got a Designer record at all. Department and the
+Department-Head/Stakeholder side of Team profile stay optional: a first-login
+screen is exactly the moment someone is least likely to know their department
+yet, and nothing about a Stakeholder is silently invisible the way an
+unlinked Designer is.
+
+**Required/Optional is stated on the label, not left to the paragraph below
+it.** Onboarding surfaced a real usability problem: with everything phrased as
+prose ("Optional — leave this for now if..."), it read as unclear which of
+several fields actually gated Continue. `Required`/`Optional`
+(`src/components/shared/field-requirement.tsx`) are two one-line tags appended
+to `FieldLabel` text — `*` for required, a muted "(optional)" for everything
+else — rather than a new `Field` prop or a rewrite of the description copy.
+Design role is the one label whose tag changes with context (`*` on
+Onboarding, "(optional)" in Settings), driven by the `requireDesignRole` flag
+the hook already carried for its submit-validation; every other field's
+requiredness doesn't depend on which screen is rendering it.
+
+**Self-provisioning's create-then-link had a real foreign-key race, not just
+an unclear-copy problem.** `designerRepository.create`/`stakeholderRepository.
+create` are the ordinary optimistic writes (docs/DECISIONS.md "Supabase
+behind a synchronous in-memory cache") — they return a complete record
+synchronously and send the actual INSERT to Supabase in the background,
+unawaited. The very next step in this flow, though, is an *awaited* `profiles`
+UPDATE that points `designer_id`/`stakeholder_id` — a real foreign key — at
+that record's id. Nothing guaranteed the INSERT would land before the
+awaited UPDATE reached Postgres; when it didn't, the FK check failed against
+a row that (from the browser's own cache) looked like it already existed.
+Fixed with `createAwaited` on both repositories — same shape as `create`, but
+`await`s the insert before returning — used only at this one call site. Every
+other caller of `create` still gets the fast, optimistic version; this is not
+a change to how those repositories behave everywhere.
+
+## Onboarding requires a linked Designer record for designer roles; Settings still doesn't
+
+A real invite exposed the gap in "Department and the Designer/Stakeholder link
+stay optional on this screen too" (further up this file): an invited account
+picked a designer-type Design role, left the (optional) Home Squad field
+alone, hit Continue, and landed in the app never having been linked to a
+Designer record. Nothing broke — that is exactly what optional was specified
+to allow — but the result was silently wrong for the actual goal of inviting
+someone as a designer: they didn't show up in Master Data → Designers, or in
+any Squad Lead / supporting-designer picker, until someone noticed and fixed
+it by hand.
+
+**Decision:** Onboarding (`requireDesignRole`) adds one more requirement on
+top of "Design role can't be Not set": if the chosen role is a designer-type
+one, the account has to end up with a non-null `designer_id` before Continue
+proceeds. Settings → Profile does not gain this rule — an existing account is
+still free to unlink itself from its Designer record at any time, matching
+every decision above about self-provisioning being opt-in there.
+
+**Home Squad itself stays optional, even under this new rule** — the
+requirement is "linked to *a* Designer record," which has two routes: pick an
+existing unclaimed one via the `Designer record` field, or create one by
+choosing a Home Squad. Tagging `Home Squad` itself `Required` would have been
+wrong (and was rejected): filling it is never mandatory in isolation, only
+one of two ways to satisfy a requirement that lives on the field above it. The
+`Required`/`Optional` tag therefore moved to the `Designer record` label
+instead, conditioned on `form.requireDesignRole` — the one label in
+`TeamProfileFields` whose tag actually changes between the two screens.
+
+## Create new / Link existing is a Tabs switcher, not two adjacent fields
+
+Feedback on the shipped Onboarding screen: "Designer record" read as a
+link-only picker, with "create a new one" living in a separate field below it
+(`Home squad, to create a new record`) that was easy to never notice —
+especially since the most common case reaching this screen is an account with
+*nothing* to link to yet, at which point the picker just shows an empty
+"Not linked" and gives no hint that creating one is even possible.
+
+**Decision:** both the Designer and Stakeholder side of Team profile are a
+`Tabs` switcher (`Create new` / `Link existing`), reusing the same primitive
+`ProjectViewSwitcher` already uses as a plain controlled value-switcher (no
+`TabsContent`, just conditional rendering keyed off the selected value) —
+not a new interaction pattern for this app. **Defaults to `Create new`**: most
+accounts here have never had a person record before, so that is the likely
+path, not linking one an admin happened to add in advance. `Link existing`
+still always shows, even with zero unclaimed records to offer — hidden would
+have read as "not possible," but "No unclaimed \[…\] records exist yet — use
+Create new instead" says why, which is more honest than removing the option.
+
+Switching tabs clears the other tab's selection (a stale `designerId` behind
+a `Create new` tab would still submit as *linking* that id, not creating
+anything) — `handleDesignerModeChange`/`handleStakeholderModeChange`, not the
+bare `setDesignerMode`/`setStakeholderMode` a plain `Tabs` `onValueChange`
+would suggest.
+
+**The initial tab, and flipping back to `Link existing` after a create
+succeeds, is state adjusted during render, not a `useEffect`.** A `designerId`
+arriving from null to non-null (a fresh link, or the very record this
+component just created) should flip the visible tab to `Link existing`
+without an extra render's delay — exactly the case React's own docs describe
+as "adjusting state when a prop changes," using a tracked previous-value
+`useState` compared during the render body. The equivalent `useEffect` was
+tried first and rejected: the project's lint config flags
+`setState`-in-effect for exactly this reason (cascading renders), and the
+render-time version is both what's recommended and one render cycle faster.
+
+## Onboarding's captcha is local button-gating state, not a form validation rule
+
+Explicit ask: require a captcha after the Onboarding form is filled in, before
+the account can finish onboarding. Picked `playcaptcha` (`ClawCaptcha`) — a
+claw-machine mini-game captcha — over a conventional checkbox/image captcha
+because it was the package requested; it's a young package (v0.1.0, single
+maintainer) with no track record, flagged to the user before installing, who
+chose to proceed anyway.
+
+**Decision:** the captcha lives entirely in `OnboardingView`
+(`src/components/auth/onboarding-view.tsx`), as its own `step: "form" |
+"captcha"` and `captchaVerified` `useState`, not inside
+`useProfileIdentityForm`. That hook is shared with Settings → Profile
+(`docs/DECISIONS.md`, "Field and perilakunya identik…" in `docs/PRD.MD` §6),
+and Settings never asks for a captcha or has a second screen — putting either
+in the hook would have required flags threaded through both call sites for
+something that is, per the ask, onboarding-only.
+
+**Two screens, not one form with the captcha appended:** the fields screen's
+"Continue" is a plain submit that calls a new `form.validate()` — the exact
+guard clauses `handleSubmit` always ran (name required, Design role
+required, linked-designer requirement, in-use-elsewhere checks), extracted
+out of `handleSubmit` so they can run on their own before the screen switch.
+`handleSubmit` itself is unchanged in behavior: `validate()` first, then the
+same save it always did. Only once `validate()` passes does `setStep`
+switch to the captcha screen, which renders `ClawCaptcha` behind its own
+`<form onSubmit={form.handleSubmit}>` and a "Confirm" button
+(`disabled={form.submitting || !captchaVerified}`) — that is the button that
+actually persists. A "Back" link returns to the fields screen without losing
+its state (the hook's state lives in `OnboardingView`, above both screens, so
+switching `step` back and forth doesn't remount it).
+
+**Visual fit:** this is an enterprise/calm/minimal product; the package's
+default styling is bright and playful. `ClawCaptcha`'s themeable CSS vars
+(`--clawcap-bg/-ink/-muted/-accent/-action`) are mapped in
+`src/app/globals.css` onto this app's own tokens (`--card`, `--foreground`,
+`--muted-foreground`, `--primary`, `--destructive`) so the one playful step
+in onboarding still reads as DesignOps rather than a bolted-on widget from a
+different product.
+
+**Assets:** the package serves toy PNGs from a configurable `assetBase` prop,
+copied into `public/playcaptcha/toys/`. Its logo, however, is hardcoded in
+the package's own bundle to `/playcaptcha.svg` at the site root — not
+actually affected by `assetBase`, despite what the package's README implies
+— so that one file was placed at `public/playcaptcha.svg` instead of
+alongside the toys.
+
+## "Teams" renamed to "Squads" even though it now matches Master Data → Squads
+
+The top-level nav item and its page (`/teams`, PRD §14.7) were renamed from
+"Teams" to "Squads" on request. This makes it read identically to Master
+Data → Squads, a different (CRUD) page — the app had so far avoided this by
+using a different word for a read-only operational overview than for its
+Master Data counterpart (People vs. Designers is the existing example).
+
+Kept "Squads" anyway rather than a distinguishing label like "Squad
+Overview": the page was already squad-specific throughout its own code
+(`visibleSquads`, `getSquadLead`, `TeamsFilterBar` etc. — "Teams" was only
+ever the user-facing label, "Teams" is not a concept the domain model has),
+so matching that internal terminology in the copy was judged more valuable
+than avoiding the nav-list duplicate. The two "Squads" entries sit in
+different parts of the sidebar (top-level vs. inside Master Data), which
+should keep them distinguishable by context.
+
+Copy-only change: the route (`/teams`) and internal identifiers
+(`TeamsPage`, `TeamsFilterBar`, `DEFAULT_TEAMS_FILTERS`) were left alone —
+renaming those would touch far more files for no user-visible benefit.
+
+## Shared Squad Membership is a stored table, deliberately independent of Project Assignment
+
+Squad View (`docs/PRD.MD` §13.1, §14.7) asked for a Home/Primary squad plus
+"Shared" squads a designer can be dragged into, with a "Shared" badge shown
+everywhere except their Primary Squad. The existing domain model has no such
+concept: `Designer.home_squad_id` is one required field, and the only other
+notion of "which squad a designer touches" is Cross-squad Logic (§32) —
+`designer.home_squad_id !== project.owner_squad_id`, entirely derived from
+Project Assignment, never stored.
+
+Two ways to get "Shared" were considered:
+
+1. **Derive it from Project Assignment** — a designer reads as "shared" into
+   a squad if they support a project that squad owns. Zero schema change,
+   and consistent with how every other "cross-squad" fact in this app already
+   works (§32).
+2. **A new stored membership table**, independent of Project Assignment.
+
+**Decision: option 2**, on explicit instruction — squad membership and
+project assignment are to stay separate concepts, and sharing must work even
+when the target squad has no project for the designer to be assigned to
+(dragging a designer onto an empty squad and choosing "Share" has nothing to
+attach a Project Assignment row to). Option 1 could not satisfy that case at
+all, since it has no meaning without a project in common.
+
+**Shape of the table** (`squad_designer_memberships`: `id, designer_id,
+squad_id`, unique per pair): it only ever holds *additional* memberships.
+`Designer.home_squad_id` remains the single source of truth for a designer's
+Primary Squad — unchanged, still `not null`, still read everywhere it already
+was (People, Designers, Cross-squad Logic). Nothing about Project Assignment
+or §32's derived Cross-squad badge changes; the two "cross-squad" concepts
+(derived project fact vs. explicit squad membership) now coexist on purpose
+and are cross-referenced in the PRD (§13.1, §32) so they're never conflated.
+
+`squadDesignerMembershipRepository.addMembership`/`removeMembership` enforce
+the invariants close to the data rather than in every call site: adding a
+membership that already exists, or that names the designer's own current
+Primary Squad, is a no-op; the same (designer, squad) pair can't be recorded
+twice (`unique (designer_id, squad_id)` at the database level too). "Move"
+(`DesignerAllocationDialog`) writes `home_squad_id` and then removes any now-
+redundant Shared row for that same squad — a designer who becomes Primary
+somewhere was, by definition, not usefully also "Shared" there.
+
+## Squad View adds real mutation UI to Teams — Move/Share confirmation, drag never mutates silently
+
+This extends the reversal already recorded above ("Teams' 'No designers · Add'
+gains an inline multi-select dialog") one step further: Squad View's kanban
+lets a designer be dragged between squad columns, which is Teams' first
+drag-and-drop interaction and its first Share action. Explicit current-task
+instruction, same as before, outranks the older "People and Teams are
+read-only directories" rule per `CLAUDE.md`'s stated precedence order.
+
+**Drag never writes on its own.** `SquadBoard`'s `onDragEnd` only ever opens
+`DesignerAllocationDialog` — a drop is a *request*, never a write. The one
+exception is a same-column drop or a drop on a squad the designer already
+belongs to (Primary or Shared), which is silently a no-op: there is nothing
+to confirm when nothing would change. This mirrors the existing "Manage
+members → Move" dialog's shape (`manage-squad-members-dialog.tsx`) rather
+than inventing a new confirmation pattern: pick a destination, see the
+consequence stated in words, then commit — Squad View's version front-loads
+the destination via drag instead of a `<Select>`, and adds the Move-vs-Share
+branch that dialog never needed (Master Data has no "Share" concept).
+
+**Squad Lead protection carries over unchanged.** Moving a designer who leads
+their old squad clears that squad's `lead_designer_id` with the same warning
+copy `manage-squad-members-dialog.tsx` and `add-squad-members-dialog.tsx`
+already use — one more place the existing guard had to be repeated, since
+Squad has no trigger-level enforcement of "a lead must still be a member."
+
+**Talent Pool (spec's "Guest" column for designers with no Primary Squad) was
+deliberately dropped for this iteration.** `designers.home_squad_id` is
+`not null` throughout the schema, the Designer create/edit form, and every
+selector that reads it (People, Cross-squad Logic, Overview) — giving a
+designer no Primary Squad is a nullability change with a much wider blast
+radius than Squad View itself, on explicit instruction to skip it for now.
+Squad View therefore only ever renders real squads; every designer always has
+exactly one Primary Squad column they appear in.
+
+## Global filter toolbar simplification (2026-09-13): Projects drops its duplicate quick filters, Squads gains a Filters panel, and the view switcher joins the Search/Filters row everywhere
+
+**Decision:** Two changes, both driven by an explicit task brief asking for one consistent rule: *"If a page already has a comprehensive Filters button/panel, do not expose the same filters individually in the main toolbar."*
+
+1. **Projects** (`projects-filter-bar.tsx`) no longer renders Needs Allocation, Status, Priority, or Department as standalone toolbar controls alongside its existing Advanced Filters popover — they were duplicated in both places (the popover already mirrored them for responsive fallback). All four now live only inside the one "Filters" panel: Needs Allocation/Status/Priority/Department apply live, Epic/Owner Squad/Design Lead/Timeline/Health/Show Archived stay staged behind Apply/Reset, unchanged. The Filters button's badge now counts every active dimension (`Filters · 3`), not just the staged ones, since it's the toolbar's only remaining indicator of active state.
+2. **Squads** (`teams-filter-bar.tsx`) gained its first "Filters" popover, consolidating Staffing/Lead/Status — previously three standalone `FilterSelect` triggers — behind one button, live-applying (no staged Apply, matching Timeline's collapsed popover rather than Projects' staged one, since three simple selects have nothing worth batching). Squads also gained its first removable-chip row: with the individual controls no longer directly visible, the chips are now the only way to see what's active without opening the panel.
+
+Both pages' Board/List/Table (Projects) and Table/Squad (Squads) view switchers now render in the same toolbar row as Search/Filters — passed to the shared `<FilterBar>` as a new `leading` prop, pinned to the opposite side via `justify-between` — instead of on their own row above it. `FilterBar` only applies `justify-between` when `leading` is passed, so People/Timeline/Master Data (no view switcher) are visually unchanged.
+
+**Why:** This reverses part of an earlier decision ("Filter bars standardized across Projects/People/Teams/Timeline," above) that deliberately gave Squads/People *no* Filters popover, reasoning that three or four dimensions are "nothing to disclose" and a popover would be progressive disclosure for its own sake. The explicit task brief this time targets a different problem than that entry weighed: not whether a small filter set benefits from hiding, but whether a toolbar's presentation is consistent and free of redundant entry points once a panel exists — and, for Squads specifically, that the page adopt the same panel pattern Projects and Timeline already use rather than staying the odd one out. Per `CLAUDE.md`'s instruction precedence, an explicit current-task instruction outranks a prior recorded decision; People and the five Master Data screens were deliberately left untouched, since none of them exhibit the redundant-toolbar-vs-panel problem this task targets (no page there has both a panel and duplicated standalone controls, and none has a view switcher to align into the row).
+
+## Verified badge (2026-09-13): computed from `profiles.designer_id`/`.stakeholder_id`, not a stored field
+
+**Ask:** distinguish, on Master Data → Designers and → Stakeholders, a row that
+belongs to a real person who was invited, signed in, and filled out their
+profile from a row an admin created directly in Master Data with no account
+behind it.
+
+**Decision:** no new column, no new table. The domain model already carries
+exactly this fact: `Profile.designer_id`/`Profile.stakeholder_id` (§6.1) is a
+nullable, unique FK that only gets set once an invited account links itself to
+a Designer/Stakeholder row — and Onboarding requires that link before a
+designer-role account can finish (see "Onboarding requires a linked Designer
+record," above). So "verified" is just "some profile's designer_id/
+stakeholder_id equals this row's id" — a plain existence check
+(`isDesignerVerified`/`isStakeholderVerified`, `src/lib/selectors/
+designerSelectors.ts` / `stakeholderSelectors.ts`), computed at read time from
+data already in the in-memory cache, same as `getDesignerUsage`/
+`getStakeholderUsage` right above them. Storing a redundant `verified` boolean
+on Designer/Stakeholder was rejected — it would just be a cache of a fact the
+unique FK already states, with its own staleness problem the FK doesn't have.
+
+**Badge, not a column.** `VerifiedBadge` (`src/components/shared/
+verified-badge.tsx`) is a small `BadgeCheck` icon rendered inline next to the
+Name cell, with a Tooltip spelling out what it means on hover/focus — not a
+sixth/seventh table column, which would mostly render empty (most rows in a
+freshly-seeded roster have no linked account yet, and that's the normal
+state, not a warning). It reuses `--status-success` — the same token
+`EntityStatusBadge`'s Active state already uses — rather than introducing a
+new color for what is, semantically, the same kind of affirmative fact.
+
+**Both pages now read `profiles` reactively, not just their own table.**
+Designers already used `useRepositoryList` per repository, so it gained one
+more subscription (`useRepositoryList(profileRepository)`, unused return
+value — its only job is to force a re-render when `profiles` changes so the
+badge updates live if someone completes onboarding while the page is open).
+Stakeholders still reads its tables by hand (`useEffect` + `subscribe`, one
+`read()` covering `stakeholders`/`departments`); it gained a third
+`setProfiles` in that same `read()` rather than switching the whole page to
+`useRepositoryList`, which would have been an unrelated refactor. Its
+verified set is precomputed once as `verifiedStakeholderIds` (a `Set`, same
+shape as the existing `departmentNameById` map on that page) instead of
+calling the selector per row inside the table's `useMemo` — calling the
+imported selector directly there compiles fine but reads from
+`profileRepository.getAll()` without the memo's dependency array actually
+referencing `profiles`, which `react-hooks/exhaustive-deps` correctly flags
+as a dependency the memo doesn't see.

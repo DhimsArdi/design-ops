@@ -19,14 +19,8 @@ import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
 import { PersonAvatar } from "@/components/shared/person-avatar"
 import { Button } from "@/components/ui/button"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table } from "@/components/motion/table"
+import type { TableColumn } from "@/components/motion/table"
 
 import { PeopleFilterBar, DEFAULT_PEOPLE_FILTERS, type PeopleFilters } from "./_components/people-filter-bar"
 
@@ -36,6 +30,7 @@ import * as designerRepository from "@/lib/repositories/designerRepository"
 import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as projectRepository from "@/lib/repositories/projectRepository"
 import * as projectAssignmentRepository from "@/lib/repositories/projectAssignmentRepository"
+import type { Designer } from "@/lib/domain/types"
 
 // "Active Projects" per docs/DECISIONS.md / PRD §14.1 — a local literal set
 // (same convention as project-detail-view.tsx) rather than importing
@@ -121,7 +116,7 @@ export default function PeoplePage() {
 
       return true
     })
-    return [...matches].sort((a, b) => a.name.localeCompare(b.name))
+    return matches
   }, [designers, debouncedSearch, filters, squadsById, statsByDesignerId])
 
   const hasAnyDesigners = designers.length > 0
@@ -132,6 +127,88 @@ export default function PeoplePage() {
     filters.seniority.length > 0 ||
     filters.status !== "all" ||
     filters.assignment !== "all"
+
+  const columns = useMemo<TableColumn<Designer>[]>(
+    () => [
+      {
+        key: "avatar",
+        header: <span className="sr-only">Avatar</span>,
+        width: "56px",
+        cell: (designer) => <PersonAvatar person={designer} size="sm" />,
+      },
+      {
+        key: "name",
+        header: "Name",
+        sortable: true,
+        cell: (designer) => (
+          <Link
+            href={`/people/${designer.id}`}
+            className="font-medium text-foreground hover:underline"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {designer.name}
+          </Link>
+        ),
+      },
+      {
+        key: "job_title",
+        header: "Role",
+        cell: (designer) => <span className="text-muted-foreground">{designer.job_title}</span>,
+      },
+      {
+        key: "seniority",
+        header: "Seniority",
+        cell: (designer) => <span className="text-muted-foreground">{designer.seniority}</span>,
+      },
+      {
+        key: "home_squad",
+        header: "Home Squad",
+        cell: (designer) => (
+          <span className="text-muted-foreground">
+            {squadsById.get(designer.home_squad_id)?.name ?? "–"}
+          </span>
+        ),
+      },
+      {
+        key: "activeProjects",
+        header: "Active Projects",
+        align: "right",
+        cell: (designer) => (
+          <span className="tabular-nums text-foreground">
+            {statsByDesignerId.get(designer.id)?.activeProjects ?? 0}
+          </span>
+        ),
+      },
+      {
+        key: "leadProjects",
+        header: "Lead Projects",
+        align: "right",
+        cell: (designer) => (
+          <span className="tabular-nums text-foreground">
+            {statsByDesignerId.get(designer.id)?.leadProjects ?? 0}
+          </span>
+        ),
+      },
+      {
+        key: "supportProjects",
+        header: "Support Projects",
+        align: "right",
+        cell: (designer) => (
+          <span className="tabular-nums text-foreground">
+            {statsByDesignerId.get(designer.id)?.supportProjects ?? 0}
+          </span>
+        ),
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (designer) => <EntityStatusBadge status={designer.status} />,
+      },
+    ],
+    [squadsById, statsByDesignerId]
+  )
+
+  const tableHeight = Math.min(560, (visibleDesigners.length + 1) * 48)
 
   return (
     <div className="space-y-6">
@@ -183,64 +260,14 @@ export default function PeoplePage() {
                 }
               />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">
-                      <span className="sr-only">Avatar</span>
-                    </TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Seniority</TableHead>
-                    <TableHead>Home Squad</TableHead>
-                    <TableHead className="text-right">Active Projects</TableHead>
-                    <TableHead className="text-right">Lead Projects</TableHead>
-                    <TableHead className="text-right">Support Projects</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleDesigners.map((designer) => {
-                    const squad = squadsById.get(designer.home_squad_id)
-                    const stats = statsByDesignerId.get(designer.id)
-                    return (
-                      <TableRow
-                        key={designer.id}
-                        className="cursor-pointer"
-                        onClick={() => router.push(`/people/${designer.id}`)}
-                      >
-                        <TableCell>
-                          <PersonAvatar person={designer} size="sm" />
-                        </TableCell>
-                        <TableCell>
-                          <Link
-                            href={`/people/${designer.id}`}
-                            className="font-medium text-foreground hover:underline"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            {designer.name}
-                          </Link>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{designer.job_title}</TableCell>
-                        <TableCell className="text-muted-foreground">{designer.seniority}</TableCell>
-                        <TableCell className="text-muted-foreground">{squad?.name ?? "–"}</TableCell>
-                        <TableCell className="text-right tabular-nums text-foreground">
-                          {stats?.activeProjects ?? 0}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-foreground">
-                          {stats?.leadProjects ?? 0}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-foreground">
-                          {stats?.supportProjects ?? 0}
-                        </TableCell>
-                        <TableCell>
-                          <EntityStatusBadge status={designer.status} />
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+              <Table
+                data={visibleDesigners}
+                columns={columns}
+                getRowId={(designer) => designer.id}
+                onRowClick={(designer) => router.push(`/people/${designer.id}`)}
+                defaultSort={{ key: "name", direction: "asc" }}
+                height={tableHeight}
+              />
             )}
           </>
         )}

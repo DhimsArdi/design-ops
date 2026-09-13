@@ -1,17 +1,19 @@
 // Add/Edit Project — Step 3: Design Team (docs/PRD.MD §23).
 //
+// Two sections: who leads the design work, and who else is on it.
+//
 // Project Design Lead and Supporting Designers both source from every
 // Designer regardless of squad (PRD §23 — "Do not prevent selecting
 // designer from another squad"); Cross-squad is shown, never enforced.
 // No-duplicate-across-Lead+Support is enforced by the wizard (which owns
 // `leadDesignerId`/`supportDesignerIds` together) and reinforced here by
-// excluding the current Lead from the Support checklist's own options.
+// excluding the current Lead from the Support picker's own options.
 
 import { Badge } from "@/components/ui/badge"
-import { Label } from "@/components/ui/label"
-import { MultiSelectChecklist } from "@/components/shared/multi-select-checklist"
 import { PersonAvatar } from "@/components/shared/person-avatar"
 import { PersonSelect } from "@/components/shared/person-select"
+import { SearchableMultiSelect } from "@/components/shared/searchable-multi-select"
+import { WizardField, WizardSection, WizardSections } from "./wizard-section"
 import { useCurrentDesignerId } from "@/lib/identity/current-user"
 import { personDisplayName } from "@/lib/identity/person-display"
 import { activeOrSelected, byName } from "./project-form-types"
@@ -50,55 +52,61 @@ function StepDesignTeam({
       const isCrossSquad = ownerSquadId !== "" && designer.home_squad_id !== ownerSquadId
       return {
         id: designer.id,
-        label: (
-          <span className="flex items-center gap-2">
-            <PersonAvatar person={designer} size="sm" />
-            {personDisplayName(designer, currentDesignerId)}
-          </span>
-        ),
-        description: (
-          <span className="flex flex-wrap items-center gap-1.5">
-            <span>{designer.job_title}</span>
-            <span aria-hidden="true">·</span>
-            <span>{squad?.name ?? "Unknown squad"}</span>
-            {isCrossSquad ? (
-              <Badge variant="outline" className="h-4 px-1.5 text-[10px] font-normal">
-                Cross-squad
-              </Badge>
-            ) : null}
-          </span>
-        ),
+        label: personDisplayName(designer, currentDesignerId),
+        // Structural context while selecting, as the PRD asks for: the job
+        // title and the squad they come from, on one line (§23).
+        description: [designer.job_title, squad?.name ?? "Unknown squad"].filter(Boolean).join(" · "),
+        visual: <PersonAvatar person={designer} size="sm" />,
+        badge: isCrossSquad ? (
+          <Badge variant="outline" className="h-4 shrink-0 px-1.5 text-[10px] font-normal">
+            Cross-squad
+          </Badge>
+        ) : undefined,
       }
     })
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-1.5">
-        <Label htmlFor="project-design-lead">Project Design Lead</Label>
-        <PersonSelect
-          id="project-design-lead"
-          value={leadDesignerId}
-          onChange={onLeadChange}
-          people={designerOptions}
-          currentDesignerId={currentDesignerId}
-          emptyOption="Unassigned"
-        />
-        <p className="text-xs text-muted-foreground">
-          Leaving this empty is valid: the project shows as Unassigned until a Lead is set.
-        </p>
-      </div>
+    <WizardSections>
+      <WizardSection
+        title="Design Ownership"
+        description="Define the designer responsible for leading this project."
+      >
+        <WizardField
+          label="Project Design Lead"
+          htmlFor="project-design-lead"
+          optional
+          hint="Leaving this empty is valid: the project shows as Unassigned until a Lead is set."
+        >
+          <PersonSelect
+            id="project-design-lead"
+            value={leadDesignerId}
+            onChange={onLeadChange}
+            people={designerOptions}
+            currentDesignerId={currentDesignerId}
+            emptyOption="Unassigned"
+          />
+        </WizardField>
+      </WizardSection>
 
-      <div className="space-y-1.5">
-        <Label>Supporting Designers</Label>
-        <MultiSelectChecklist
-          idPrefix="support-designer"
-          options={supportOptions}
-          selectedIds={supportDesignerIds}
-          onChange={onSupportChange}
-          emptyMessage="No other designers available."
-        />
-      </div>
-    </div>
+      <WizardSection
+        title="Design Team"
+        description="Assign the designers who will contribute to this project. Designers from another squad are marked Cross-squad."
+      >
+        <WizardField label="Supporting Designers" htmlFor="support-designers" optional>
+          <SearchableMultiSelect
+            id="support-designers"
+            options={supportOptions}
+            selectedIds={supportDesignerIds}
+            onChange={onSupportChange}
+            placeholder="Search or select designers…"
+            searchPlaceholder="Search designers…"
+            selectionLabel="Selected designers"
+            emptyMessage="No other designers available."
+            noMatchMessage="No matching designers."
+          />
+        </WizardField>
+      </WizardSection>
+    </WizardSections>
   )
 }
 

@@ -6,16 +6,11 @@
 // how an auth flow ends up subtly re-laying-out as you move through it.
 //
 // Layout is shadcn's login-02 block: form left, context panel right. The panel
-// is a muted surface naming what is behind the gate rather than an image —
-// nothing to invent, nothing to load before the form is usable.
+// shows the BNI Direct login artwork (public/images/bnidirect-login.png).
 
 import type { ReactNode } from "react"
+import Image from "next/image"
 import Link from "next/link"
-
-// The five planning surfaces AppShell navigates to. Listed so the empty half of
-// the split has real content, and so an invited user landing here cold knows
-// what they signed into.
-const SURFACES = ["Overview", "Timeline", "Projects", "People", "Teams"]
 
 interface AuthLayoutProps {
   title: string
@@ -47,17 +42,14 @@ function AuthLayout({ title, description, children, footer }: AuthLayoutProps) {
         </div>
       </div>
 
-      <div className="hidden border-l border-border bg-muted lg:flex lg:flex-col lg:justify-end lg:p-10">
-        <p className="max-w-md text-xl leading-snug font-medium text-balance text-foreground">
-          Design portfolio and manpower planning for the design team.
-        </p>
-        <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2">
-          {SURFACES.map((surface) => (
-            <li key={surface} className="text-sm text-muted-foreground">
-              {surface}
-            </li>
-          ))}
-        </ul>
+      <div className="relative hidden border-l border-border bg-muted lg:block">
+        <Image
+          src="/images/bnidirect-login.png"
+          alt=""
+          fill
+          priority
+          className="object-cover"
+        />
       </div>
     </div>
   )

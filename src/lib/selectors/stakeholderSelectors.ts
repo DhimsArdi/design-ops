@@ -1,6 +1,7 @@
 // Derived data for Stakeholder (docs/PRD.MD §8.5).
 
 import * as departmentRepository from "@/lib/repositories/departmentRepository";
+import * as profileRepository from "@/lib/repositories/profileRepository";
 import * as projectRepository from "@/lib/repositories/projectRepository";
 
 /**
@@ -27,4 +28,14 @@ export function getStakeholderUsage(
           project.project_admin_ids.includes(stakeholderId),
       ).length,
   };
+}
+
+/**
+ * Whether this Stakeholder row is claimed by a real invited account, rather
+ * than created directly in Master Data — the same "organic vs. admin-created"
+ * distinction as `isDesignerVerified` (see designerSelectors.ts), mirrored via
+ * `profiles.stakeholder_id` instead of `profiles.designer_id`.
+ */
+export function isStakeholderVerified(stakeholderId: string): boolean {
+  return profileRepository.getAll().some((profile) => profile.stakeholder_id === stakeholderId);
 }

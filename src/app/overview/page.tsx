@@ -342,7 +342,7 @@ export default function OverviewPage() {
       </ContentSection>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <ContentSection title="Team Snapshot" className="lg:col-span-2">
+        <ContentSection title="Squad Snapshot" className="lg:col-span-2">
           {data.teamRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">No active squads right now.</p>
           ) : (

@@ -58,10 +58,10 @@ type NavItem = {
 // in navigation, not just in copy.
 const PLANNING_ITEMS: NavItem[] = [
   { label: "Overview", href: "/overview", icon: LayoutDashboard },
-  { label: "Timeline", href: "/timeline", icon: CalendarRange },
   { label: "Projects", href: "/projects", icon: FolderKanban, countKey: "projects" },
+  { label: "Timeline", href: "/timeline", icon: CalendarRange },
+  { label: "Squads", href: "/teams", icon: UsersRound, countKey: "teams" },
   { label: "People", href: "/people", icon: Users, countKey: "people" },
-  { label: "Teams", href: "/teams", icon: UsersRound, countKey: "teams" },
 ]
 const ADMIN_ITEMS: NavItem[] = [{ label: "Master Data", href: "/master-data", icon: Database }]
 
@@ -212,7 +212,7 @@ function AppShell({ children }: { children: ReactNode }) {
             {activeItem?.label ?? "DesignOps"}
           </h1>
         </header>
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto">
           <div className="mx-auto w-full max-w-[1440px] p-6">{children}</div>
         </main>
       </div>

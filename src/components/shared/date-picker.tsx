@@ -53,6 +53,8 @@ interface DatePickerProps {
   /** Latest selectable day, "YYYY-MM-DD". */
   max?: string
   disabled?: boolean
+  /** Marks the trigger as failing validation, so it draws the same red border as an Input does. */
+  invalid?: boolean
   "aria-label"?: string
   className?: string
 }
@@ -65,6 +67,7 @@ function DatePicker({
   min,
   max,
   disabled,
+  invalid,
   "aria-label": ariaLabel,
   className,
 }: DatePickerProps) {
@@ -98,6 +101,7 @@ function DatePicker({
             type="button"
             variant="outline"
             disabled={disabled}
+            aria-invalid={invalid || undefined}
             aria-label={ariaLabel}
             className={cn(
               "h-9 w-full justify-between px-2.5 font-normal",

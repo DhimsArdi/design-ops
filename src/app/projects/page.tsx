@@ -1,27 +1,20 @@
 "use client"
 
-// Projects — project directory / source of truth (PRD §14.3). Search,
-// filter, and sort every project; drill into a project via its name link.
-// This page mutates a project only via row-level Delete (archive/edit stay
-// on /projects/[id] and /projects/[id]/edit) — so it just reads fresh data
-// from the repositories on every mount (see use-repository-list).
+// Projects — operational workspace (Projects page revamp, docs/PRD.MD
+// §14.3). Board (default) / List / Table view modes over the same
+// search/filter set; lifecycle status and view mode are unrelated axes —
+// switching views never changes which projects are visible, only how.
 //
-// Active/Completed/All tabs (docs/PRD.MD §14.3) are the default lifecycle
-// scope — Active = {Planning, In Progress, On Hold}, a deliberately broader
-// definition than Overview's "Active Projects" KPI (Planning + In Progress
-// only, docs/DECISIONS.md): this is the list's default view, not the
-// headline metric. The granular Status filter only applies inside the All
-// tab; Archived visibility is unrelated to the tab and stays the existing
-// "Show archived" toggle.
+// The old Active/Completed/All tabs are gone: Board's 3 columns and List's
+// status groups already scope by lifecycle, and Table shows everything with
+// the Status filter always available for a precise combination.
 
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Suspense, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import {
   Archive,
   ArchiveRestore,
-  ArrowDown,
-  ArrowUp,
   FolderKanban,
   MoreHorizontal,
   Pencil,
@@ -38,6 +31,7 @@ import { PriorityBadge } from "@/components/shared/priority-badge"
 import { HealthBadge } from "@/components/shared/health-badge"
 import { ProjectNameLink } from "@/components/shared/project-name-link"
 import { AssignLeadControl } from "@/components/shared/assign-lead-control"
+import { AvatarGroup } from "@/components/shared/avatar-group"
 import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -48,15 +42,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table } from "@/components/motion/table"
+import type { TableColumn } from "@/components/motion/table"
 
 import {
   ProjectsFilterBar,
@@ -65,20 +52,26 @@ import {
   getProjectTimelineBucket,
   type ProjectFilters,
 } from "./_components/projects-filter-bar"
+import { ProjectViewSwitcher, type ProjectView } from "./_components/project-view-switcher"
+import { ProjectBoard } from "./_components/board/project-board"
+import { ProjectListView } from "./_components/list/project-list-view"
+import { AssignTeamDialog } from "./_components/assign-team-dialog"
 
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
 import { useRepositoryList } from "@/lib/hooks/use-repository-list"
 import * as projectRepository from "@/lib/repositories/projectRepository"
+import * as projectAssignmentRepository from "@/lib/repositories/projectAssignmentRepository"
 import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as departmentRepository from "@/lib/repositories/departmentRepository"
 import * as epicRepository from "@/lib/repositories/epicRepository"
 import * as designerRepository from "@/lib/repositories/designerRepository"
-import { getProjectLead, UNASSIGNED_DESIGN_LEAD } from "@/lib/selectors/projectSelectors"
+import { canStartProject, UNASSIGNED_DESIGN_LEAD } from "@/lib/selectors/projectSelectors"
 import { PRIORITIES, PROJECT_HEALTHS, PROJECT_STATUSES } from "@/lib/domain/enums"
 import type { ProjectStatus } from "@/lib/domain/enums"
-import type { Project } from "@/lib/domain/types"
+import type { Designer, Project } from "@/lib/domain/types"
 import { monthOf } from "@/lib/domain/dateUtils"
-import { cn } from "@/lib/utils"
+
+const PROJECTS_VIEW_KEY = "dpp-projects-view"
 
 /**
  * Seeds Status/Priority/Department-style "all" filters from a one-time read
@@ -107,17 +100,17 @@ function initialFiltersFromSearchParams(searchParams: URLSearchParams): ProjectF
   }
 }
 
-type ProjectsView = "active" | "completed" | "all"
-
-const ACTIVE_TAB_STATUSES = new Set<ProjectStatus>(["Planning", "In Progress", "On Hold"])
-
 /**
- * An explicit `?status=` drill-down (e.g. Overview's Priority Projects "View
- * all") means the caller wants exactly that status set, so the tab defaults
- * to All rather than re-narrowing it through the Active tab's own scope.
+ * An explicit `?status=`/`?health=`/`?designLead=` drill-down (e.g.
+ * Overview's stats) wants Table's always-visible, freely-combinable Status
+ * filter, not Board's fixed 3-column scope — so it wins over whatever view
+ * was last persisted. Otherwise, the persisted view (read in a mount effect
+ * below, to avoid a localStorage/SSR hydration mismatch) applies, else Board.
  */
-function initialViewFromSearchParams(searchParams: URLSearchParams): ProjectsView {
-  return searchParams.get("status") ? "all" : "active"
+function initialViewFromSearchParams(searchParams: URLSearchParams): ProjectView {
+  return searchParams.get("status") || searchParams.get("health") || searchParams.get("designLead")
+    ? "table"
+    : "board"
 }
 
 const MONTH_LABELS = [
@@ -150,6 +143,7 @@ function ProjectsPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [projects, refreshProjects] = useRepositoryList(projectRepository)
+  const [assignments] = useRepositoryList(projectAssignmentRepository)
   const [squads] = useRepositoryList(squadRepository)
   const [departments] = useRepositoryList(departmentRepository)
   const [epics] = useRepositoryList(epicRepository)
@@ -160,18 +154,32 @@ function ProjectsPageContent() {
   const [filters, setFilters] = useState<ProjectFilters>(() =>
     initialFiltersFromSearchParams(searchParams)
   )
-  const [view, setView] = useState<ProjectsView>(() => initialViewFromSearchParams(searchParams))
+  const [view, setView] = useState<ProjectView>(() => initialViewFromSearchParams(searchParams))
   const debouncedSearch = useDebouncedValue(filters.search, 250)
 
   const [sortKey, setSortKey] = useState<SortKey>("priority")
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
 
   const [deletingProject, setDeletingProject] = useState<Project | null>(null)
+  const [tableAssignTarget, setTableAssignTarget] = useState<Project | null>(null)
 
-  // ProjectAssignment rows (Lead/Support) aren't tracked by useRepositoryList
-  // anywhere else on this page — bumping this after an inline Lead assignment
-  // (AssignLeadControl) is what invalidates leadsByProjectId below.
-  const [assignmentVersion, setAssignmentVersion] = useState(0)
+  // A URL drill-down already decided the view (see initialViewFromSearchParams)
+  // — only the persisted preference should override the Board default
+  // otherwise, and only localStorage can be read on the client.
+  useEffect(() => {
+    if (searchParams.get("status") || searchParams.get("health") || searchParams.get("designLead")) return
+    const stored = window.localStorage.getItem(PROJECTS_VIEW_KEY)
+    if (stored === "board" || stored === "list" || stored === "table") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setView(stored)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function changeView(next: ProjectView) {
+    setView(next)
+    window.localStorage.setItem(PROJECTS_VIEW_KEY, next)
+  }
 
   const squadsById = useMemo(() => new Map(squads.map((squad) => [squad.id, squad])), [squads])
   const departmentsById = useMemo(
@@ -179,6 +187,7 @@ function ProjectsPageContent() {
     [departments]
   )
   const epicsById = useMemo(() => new Map(epics.map((epic) => [epic.id, epic])), [epics])
+  const designersById = useMemo(() => new Map(designers.map((designer) => [designer.id, designer])), [designers])
 
   const squadOptions = useMemo(
     () => [...squads].sort((a, b) => a.name.localeCompare(b.name)).map((squad) => ({ value: squad.id, label: squad.name })),
@@ -203,28 +212,37 @@ function ProjectsPageContent() {
     [designers]
   )
 
+  // Reactive (assignments comes from useRepositoryList, so this recomputes on
+  // any assignment write, inline Lead edit included) — replaces the old
+  // manual "assignmentVersion" cache-bust counter.
   const leadsByProjectId = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof getProjectLead>>()
-    for (const project of projects) {
-      map.set(project.id, getProjectLead(project.id))
+    const map = new Map<string, Designer | undefined>()
+    for (const assignment of assignments) {
+      if (assignment.project_role === "Lead") map.set(assignment.project_id, designersById.get(assignment.designer_id))
     }
     return map
-    // assignmentVersion isn't read above — it's a cache-bust dependency so an
-    // inline AssignLeadControl edit (which writes ProjectAssignment directly,
-    // outside useRepositoryList) invalidates this memo.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects, assignmentVersion])
+  }, [assignments, designersById])
+
+  const supportByProjectId = useMemo(() => {
+    const map = new Map<string, Designer[]>()
+    for (const assignment of assignments) {
+      if (assignment.project_role !== "Support") continue
+      const designer = designersById.get(assignment.designer_id)
+      if (!designer) continue
+      const list = map.get(assignment.project_id) ?? []
+      list.push(designer)
+      map.set(assignment.project_id, list)
+    }
+    return map
+  }, [assignments, designersById])
 
   function patchFilters(patch: Partial<ProjectFilters>) {
     setFilters((prev) => ({ ...prev, ...patch }))
   }
 
-  // Switching tabs changes what "no Status filter selected" means, so any
-  // leftover Status selection from the All tab is cleared rather than left
-  // stale and inert.
-  function changeView(next: ProjectsView) {
-    setView(next)
-    patchFilters({ status: [] })
+  function viewStatusInTable(status: ProjectStatus) {
+    changeView("table")
+    patchFilters({ status: [status] })
   }
 
   const visibleProjects = useMemo(() => {
@@ -234,12 +252,7 @@ function ProjectsPageContent() {
     const filtered = projects.filter((project) => {
       if (!filters.showArchived && project.is_archived) return false
 
-      if (view === "completed" && project.status !== "Completed") return false
-      if (view === "active" && !ACTIVE_TAB_STATUSES.has(project.status)) return false
-      if (view === "all" && filters.status.length > 0 && !filters.status.includes(project.status)) {
-        return false
-      }
-
+      if (filters.status.length > 0 && !filters.status.includes(project.status)) return false
       if (filters.priority.length > 0 && !filters.priority.includes(project.priority)) return false
       if (filters.health !== "all" && project.health !== filters.health) return false
       if (filters.squad !== "all" && project.owner_squad_id !== filters.squad) return false
@@ -248,6 +261,7 @@ function ProjectsPageContent() {
       if (filters.timeline !== "all" && getProjectTimelineBucket(project, todayKey) !== filters.timeline) {
         return false
       }
+      if (filters.needsAllocation && canStartProject(project.id)) return false
 
       const lead = leadsByProjectId.get(project.id)
       if (filters.designLead === UNASSIGNED_DESIGN_LEAD) {
@@ -287,7 +301,6 @@ function ProjectsPageContent() {
     projects,
     debouncedSearch,
     filters,
-    view,
     leadsByProjectId,
     epicsById,
     departmentsById,
@@ -296,27 +309,191 @@ function ProjectsPageContent() {
     sortDirection,
   ])
 
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))
+  // Fed to the Table's controlled `sort`/`onSortChange` so its built-in
+  // sortable headers drive the same sortKey/sortDirection this page already
+  // uses to order Board and List (they read the same `visibleProjects`, so
+  // sorting can't move into the Table alone). A third click on the same
+  // header asks for "unsorted" — this page has no such state, so that tick
+  // just wraps back to ascending instead of clearing the sort.
+  function handleTableSortChange(next: { key: string; direction: SortDirection } | null) {
+    if (next) {
+      setSortKey(next.key as SortKey)
+      setSortDirection(next.direction)
     } else {
-      setSortKey(key)
       setSortDirection("asc")
     }
-  }
-
-  function sortIndicator(key: SortKey) {
-    if (sortKey !== key) return null
-    return sortDirection === "asc" ? (
-      <ArrowUp className="size-3.5" />
-    ) : (
-      <ArrowDown className="size-3.5" />
-    )
   }
 
   function clearFilters() {
     setFilters(DEFAULT_FILTERS)
   }
+
+  const columns = useMemo<TableColumn<Project>[]>(
+    () => [
+      {
+        key: "name",
+        header: "Project",
+        cell: (project) => (
+          <div className="flex max-w-xs items-start gap-2 py-0.5">
+            <ProjectNameLink
+              href={`/projects/${project.id}`}
+              name={project.name}
+              className="min-w-0"
+              onClick={(event) => event.stopPropagation()}
+            />
+            {project.is_archived ? (
+              <Badge variant="outline" className="mt-0.5 shrink-0 text-muted-foreground">
+                Archived
+              </Badge>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        key: "epic",
+        header: "Epic",
+        cell: (project) => (
+          <span className="text-muted-foreground">{epicsById.get(project.epic_id)?.name ?? "–"}</span>
+        ),
+      },
+      {
+        key: "department",
+        header: "Department",
+        cell: (project) => (
+          <span className="text-muted-foreground">
+            {departmentsById.get(project.department_id)?.name ?? "–"}
+          </span>
+        ),
+      },
+      {
+        key: "priority",
+        header: "Priority",
+        sortable: true,
+        sortValue: (project) => `${project.priority}~${project.start_date}`,
+        cell: (project) => <PriorityBadge priority={project.priority} />,
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (project) => <StatusBadge status={project.status} />,
+      },
+      {
+        key: "owner_squad",
+        header: "Owner Squad",
+        cell: (project) => (
+          <span className="text-muted-foreground">
+            {squadsById.get(project.owner_squad_id)?.name ?? "–"}
+          </span>
+        ),
+      },
+      {
+        key: "design_lead",
+        header: "Design Lead",
+        cell: (project) => (
+          <div onClick={(event) => event.stopPropagation()}>
+            <AssignLeadControl
+              projectId={project.id}
+              lead={leadsByProjectId.get(project.id)}
+              designers={designers}
+              onAssigned={() => {}}
+            />
+          </div>
+        ),
+      },
+      {
+        key: "designers",
+        header: "Designers",
+        cell: (project) => {
+          const support = supportByProjectId.get(project.id) ?? []
+          return (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                setTableAssignTarget(project)
+              }}
+            >
+              {support.length > 0 ? (
+                <AvatarGroup people={support} />
+              ) : (
+                <span className="text-sm text-primary underline underline-offset-2">Assign</span>
+              )}
+            </button>
+          )
+        },
+      },
+      {
+        key: "timeline",
+        header: "Timeline",
+        sortable: true,
+        sortValue: (project) => `${project.start_date}~${project.end_date}`,
+        cell: (project) => (
+          <span className="text-muted-foreground">{formatTimeline(project)}</span>
+        ),
+      },
+      {
+        key: "health",
+        header: "Health",
+        cell: (project) => <HealthBadge health={project.health} />,
+      },
+      {
+        key: "actions",
+        header: <span className="sr-only">Actions</span>,
+        width: "56px",
+        align: "right",
+        cell: (project) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={(event) => event.stopPropagation()}
+                />
+              }
+            >
+              <MoreHorizontal />
+              <span className="sr-only">Project actions</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+              <DropdownMenuItem onClick={() => router.push(`/projects/${project.id}/edit`)}>
+                <Pencil />
+                Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  const updated = project.is_archived
+                    ? projectRepository.unarchive(project.id)
+                    : projectRepository.archive(project.id)
+                  if (updated) refreshProjects()
+                }}
+              >
+                {project.is_archived ? <ArchiveRestore /> : <Archive />}
+                {project.is_archived ? "Unarchive" : "Archive"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => setDeletingProject(project)}>
+                <Trash2 />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+      },
+    ],
+    [
+      epicsById,
+      departmentsById,
+      squadsById,
+      leadsByProjectId,
+      designers,
+      supportByProjectId,
+      router,
+      refreshProjects,
+    ]
+  )
+
+  const tableHeight = Math.min(560, (visibleProjects.length + 1) * 48)
 
   const hasAnyProjects = projects.length > 0
   const hasResults = visibleProjects.length > 0
@@ -330,13 +507,14 @@ function ProjectsPageContent() {
     filters.designLead !== "all" ||
     filters.health !== "all" ||
     filters.timeline !== "all" ||
-    filters.showArchived
+    filters.showArchived ||
+    filters.needsAllocation
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Projects"
-        description="The full project directory: search, filter, and drill into any project."
+        description="Plan, assign, and track design projects across the team."
         actions={
           <Button render={<Link href="/projects/new" />} nativeButton={false}>
             <Plus />
@@ -360,15 +538,8 @@ function ProjectsPageContent() {
           />
         ) : (
           <>
-            <Tabs value={view} onValueChange={(next) => changeView(next as ProjectsView)}>
-              <TabsList>
-                <TabsTrigger value="active">Active</TabsTrigger>
-                <TabsTrigger value="completed">Completed</TabsTrigger>
-                <TabsTrigger value="all">All</TabsTrigger>
-              </TabsList>
-            </Tabs>
-
             <ProjectsFilterBar
+              viewSwitcher={<ProjectViewSwitcher value={view} onChange={changeView} />}
               filters={filters}
               onFiltersChange={patchFilters}
               onClearAll={clearFilters}
@@ -377,7 +548,6 @@ function ProjectsPageContent() {
               epicOptions={epicOptions}
               squadOptions={squadOptions}
               designerOptions={designerOptions}
-              hideStatusFilter={view !== "all"}
             />
 
             {!hasResults ? (
@@ -390,162 +560,36 @@ function ProjectsPageContent() {
                   </Button>
                 }
               />
+            ) : view === "board" ? (
+              <ProjectBoard
+                projects={visibleProjects}
+                epicsById={epicsById}
+                departmentsById={departmentsById}
+                assignments={assignments}
+                designers={designers}
+                squads={squads}
+                onViewStatusInTable={viewStatusInTable}
+              />
+            ) : view === "list" ? (
+              <ProjectListView
+                projects={visibleProjects}
+                epicsById={epicsById}
+                departmentsById={departmentsById}
+                assignments={assignments}
+                designers={designers}
+                squads={squads}
+              />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Project</TableHead>
-                    <TableHead>Epic</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead
-                      aria-sort={
-                        sortKey === "priority"
-                          ? sortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : undefined
-                      }
-                    >
-                      <button
-                        type="button"
-                        onClick={() => toggleSort("priority")}
-                        className="flex items-center gap-1 text-foreground hover:text-foreground/80"
-                      >
-                        Priority
-                        {sortIndicator("priority")}
-                      </button>
-                    </TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Owner Squad</TableHead>
-                    <TableHead>Design Lead</TableHead>
-                    <TableHead
-                      aria-sort={
-                        sortKey === "timeline"
-                          ? sortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : undefined
-                      }
-                    >
-                      <button
-                        type="button"
-                        onClick={() => toggleSort("timeline")}
-                        className="flex items-center gap-1 text-foreground hover:text-foreground/80"
-                      >
-                        Timeline
-                        {sortIndicator("timeline")}
-                      </button>
-                    </TableHead>
-                    <TableHead>Health</TableHead>
-                    <TableHead className="w-10">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleProjects.map((project) => {
-                    const epic = epicsById.get(project.epic_id)
-                    const department = departmentsById.get(project.department_id)
-                    const squad = squadsById.get(project.owner_squad_id)
-                    const lead = leadsByProjectId.get(project.id)
-
-                    return (
-                      <TableRow
-                        key={project.id}
-                        className={cn("cursor-pointer", project.is_archived && "opacity-70")}
-                        onClick={() => router.push(`/projects/${project.id}`)}
-                      >
-                        <TableCell className="whitespace-normal font-medium text-foreground">
-                          <div className="flex max-w-xs items-start gap-2 py-0.5">
-                            <ProjectNameLink
-                              href={`/projects/${project.id}`}
-                              name={project.name}
-                              className="min-w-0"
-                              onClick={(event) => event.stopPropagation()}
-                            />
-                            {project.is_archived ? (
-                              <Badge variant="outline" className="mt-0.5 shrink-0 text-muted-foreground">
-                                Archived
-                              </Badge>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{epic?.name ?? "–"}</TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {department?.name ?? "–"}
-                        </TableCell>
-                        <TableCell>
-                          <PriorityBadge priority={project.priority} />
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={project.status} />
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{squad?.name ?? "–"}</TableCell>
-                        <TableCell>
-                          <AssignLeadControl
-                            projectId={project.id}
-                            lead={lead}
-                            designers={designers}
-                            onAssigned={() => setAssignmentVersion((v) => v + 1)}
-                          />
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatTimeline(project)}
-                        </TableCell>
-                        <TableCell>
-                          <HealthBadge health={project.health} />
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              render={
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  onClick={(event) => event.stopPropagation()}
-                                />
-                              }
-                            >
-                              <MoreHorizontal />
-                              <span className="sr-only">Project actions</span>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              align="end"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <DropdownMenuItem
-                                onClick={() => router.push(`/projects/${project.id}/edit`)}
-                              >
-                                <Pencil />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  const updated = project.is_archived
-                                    ? projectRepository.unarchive(project.id)
-                                    : projectRepository.archive(project.id)
-                                  if (updated) refreshProjects()
-                                }}
-                              >
-                                {project.is_archived ? <ArchiveRestore /> : <Archive />}
-                                {project.is_archived ? "Unarchive" : "Archive"}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                variant="destructive"
-                                onClick={() => setDeletingProject(project)}
-                              >
-                                <Trash2 />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+              <Table
+                data={visibleProjects}
+                columns={columns}
+                getRowId={(project) => project.id}
+                onRowClick={(project) => router.push(`/projects/${project.id}`)}
+                rowClassName={(project) => (project.is_archived ? "opacity-70" : undefined)}
+                sort={{ key: sortKey, direction: sortDirection }}
+                onSortChange={handleTableSortChange}
+                height={tableHeight}
+              />
             )}
           </>
         )}
@@ -564,6 +608,21 @@ function ProjectsPageContent() {
             projectRepository.removeCascade(deletingProject.id)
             refreshProjects()
           }}
+        />
+      ) : null}
+
+      {tableAssignTarget ? (
+        <AssignTeamDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setTableAssignTarget(null)
+          }}
+          projectId={tableAssignTarget.id}
+          projectName={tableAssignTarget.name}
+          ownerSquadId={tableAssignTarget.owner_squad_id}
+          designers={designers}
+          squads={squads}
+          onSaved={() => setTableAssignTarget(null)}
         />
       ) : null}
     </div>

@@ -1,7 +1,9 @@
-// One labelled group of settings — a heading, an optional line of context, and
-// the fields (docs/PRD.MD §14.10).
+// One labelled group of fields — a heading, an optional line of context, and
+// the fields (docs/PRD.MD §14.10). Originally Settings-only; also used by the
+// first-login Onboarding gate (src/components/auth/onboarding-view.tsx), which
+// shares its identity fields with Settings → Profile.
 //
-// Not a card. Settings is a single column of related fields, and wrapping each
+// Not a card. These are a single column of related fields, and wrapping each
 // group in its own bordered surface would draw five boxes where the page needs
 // one rhythm; the heading and the spacing already say where a group starts and
 // ends (PRD §29: subtle borders, generous whitespace, minimal cards). Pages put

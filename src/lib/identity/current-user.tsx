@@ -86,7 +86,9 @@ export function useCurrentUser(): CurrentUser | null {
     // everything else if an admin renamed them in Master Data
     // (docs/DECISIONS.md).
     const fullName = designer?.name || profile?.full_name || ""
-    const jobTitle = designer?.job_title || profile?.job_title || ""
+    // Only the linked Designer carries a job title now — Profile itself has no
+    // job_title field (Department replaced it, docs/DECISIONS.md).
+    const jobTitle = designer?.job_title || ""
 
     return {
       id: authUser.id,

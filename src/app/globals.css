@@ -184,9 +184,25 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    /* This shell never scrolls the page itself (AppShell is a fixed-height
+       h-svh layout; every screen scrolls inside its own container) — so a
+       wide-content view (Squad View's kanban, Timeline's chart) overflowing
+       sideways should never surface as a page-level horizontal scrollbar. */
+    @apply bg-background text-foreground overflow-x-hidden;
   }
   html {
     @apply font-sans;
   }
+}
+
+/* playcaptcha (ClawCaptcha, src/components/auth/onboarding-view.tsx) ships
+   bright defaults built for a playful product; these map it onto this app's
+   own tokens so the one playful step in onboarding still reads as DesignOps,
+   not a different product's widget. */
+:root {
+  --clawcap-bg: var(--card);
+  --clawcap-ink: var(--foreground);
+  --clawcap-muted: var(--muted-foreground);
+  --clawcap-accent: var(--primary);
+  --clawcap-action: var(--destructive);
 }

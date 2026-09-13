@@ -40,14 +40,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table } from "@/components/motion/table"
+import type { TableColumn } from "@/components/motion/table"
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
 import { subscribe } from "@/lib/store/dataStore"
 import * as epicRepository from "@/lib/repositories/epicRepository"
@@ -185,6 +179,58 @@ export default function EpicsPage() {
   const hasEpics = (epics?.length ?? 0) > 0
   const hasResults = filteredEpics.length > 0
 
+  const columns = useMemo<TableColumn<Epic>[]>(
+    () => [
+      {
+        key: "name",
+        header: "Epic Name",
+        sortable: true,
+        cell: (epic) => <span className="font-medium text-foreground">{epic.name}</span>,
+      },
+      {
+        key: "department",
+        header: "Department",
+        cell: (epic) => (
+          <span className="text-muted-foreground">
+            {departmentById.get(epic.department_id)?.name ?? "–"}
+          </span>
+        ),
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (epic) => <EntityStatusBadge status={epic.status} />,
+      },
+      {
+        key: "actions",
+        header: <span className="sr-only">Actions</span>,
+        width: "56px",
+        align: "right",
+        cell: (epic) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
+              <MoreHorizontal />
+              <span className="sr-only">Actions for {epic.name}</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => openEditDialog(epic)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toggleStatus(epic)}>
+                {epic.status === "Active" ? "Deactivate" : "Activate"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => setDeletingEpic(epic)}>
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+      },
+    ],
+    [departmentById, toggleStatus]
+  )
+
+  const tableHeight = Math.min(560, (filteredEpics.length + 1) * 48)
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -234,53 +280,13 @@ export default function EpicsPage() {
                 }
               />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Epic Name</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-10">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredEpics.map((epic) => (
-                    <TableRow key={epic.id} className="hover:bg-transparent">
-                      <TableCell className="font-medium text-foreground">{epic.name}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {departmentById.get(epic.department_id)?.name ?? "–"}
-                      </TableCell>
-                      <TableCell>
-                        <EntityStatusBadge status={epic.status} />
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={<Button variant="ghost" size="icon-sm" />}
-                          >
-                            <MoreHorizontal />
-                            <span className="sr-only">Actions for {epic.name}</span>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditDialog(epic)}>
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => toggleStatus(epic)}>
-                              {epic.status === "Active" ? "Deactivate" : "Activate"}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem variant="destructive" onClick={() => setDeletingEpic(epic)}>
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <Table
+                data={filteredEpics}
+                columns={columns}
+                getRowId={(epic) => epic.id}
+                defaultSort={{ key: "name", direction: "asc" }}
+                height={tableHeight}
+              />
             )}
           </>
         )}

@@ -1,11 +1,12 @@
 "use client"
 
-// Master Data — Squads (PRD §16). Squad membership is never edited here: it
-// is always derived from Designer.home_squad_id (see squadSelectors.ts), so
-// this page only manages a squad's own fields (name, lead, description,
-// status) and offers a read-only view of derived membership.
+// Master Data — Squads (PRD §16). Membership is still never *stored* here —
+// it is always derived from Designer.home_squad_id (see squadSelectors.ts) —
+// but it is now edited here: Add member and Manage members write that field on
+// the designer, which is what keeps every other view (Designers, Teams, People,
+// Overview) in step without a second source of truth (docs/DECISIONS.md).
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { MoreHorizontal, Plus, SearchX, Users } from "lucide-react"
 import { PageHeader } from "@/components/shared/page-header"
@@ -13,9 +14,11 @@ import { ContentSection } from "@/components/shared/content-section"
 import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
 import { FilterBar } from "@/components/shared/filter-bar"
-import { PersonAvatar } from "@/components/shared/person-avatar"
 import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
+import { EmptyFieldAction } from "@/components/shared/empty-field-action"
 import { PersonSelect } from "@/components/shared/person-select"
+import { AddSquadMembersDialog } from "@/components/shared/add-squad-members-dialog"
+import { ManageSquadMembersDialog } from "./_components/manage-squad-members-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -36,14 +39,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table } from "@/components/motion/table"
+import type { TableColumn } from "@/components/motion/table"
 import { useCurrentDesignerId } from "@/lib/identity/current-user"
 import { personDisplayName } from "@/lib/identity/person-display"
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
@@ -61,7 +58,11 @@ export default function SquadsPage() {
   const debouncedSearch = useDebouncedValue(search, 250)
   const [formOpen, setFormOpen] = useState(false)
   const [editingSquad, setEditingSquad] = useState<Squad | null>(null)
-  const [viewingSquad, setViewingSquad] = useState<Squad | null>(null)
+  // Ids, not captured rows: both member dialogs look the squad up again on
+  // every render, so a lead assigned inside Manage members shows up in the
+  // same list rather than in a stale copy of it.
+  const [managingSquadId, setManagingSquadId] = useState<string | null>(null)
+  const [addingToSquadId, setAddingToSquadId] = useState<string | null>(null)
   const [deletingSquad, setDeletingSquad] = useState<Squad | null>(null)
 
   const refresh = useCallback(() => {
@@ -103,11 +104,105 @@ export default function SquadsPage() {
   }
 
   const activeDesigners = (designers ?? []).filter((designer) => designer.status === "Active")
+  const addingToSquad = (squads ?? []).find((squad) => squad.id === addingToSquadId)
 
   const trimmedSearch = debouncedSearch.trim().toLowerCase()
   const filteredSquads = (squads ?? []).filter((squad) =>
     squad.name.toLowerCase().includes(trimmedSearch)
   )
+
+  const columns = useMemo<TableColumn<Squad>[]>(
+    () => [
+      {
+        key: "name",
+        header: "Squad Name",
+        sortable: true,
+        cell: (squad) => (
+          <button
+            type="button"
+            onClick={() => setManagingSquadId(squad.id)}
+            className="font-medium text-foreground underline-offset-2 hover:underline"
+          >
+            {squad.name}
+          </button>
+        ),
+      },
+      {
+        key: "lead",
+        header: "Squad Lead",
+        cell: (squad) => {
+          const lead = getSquadLead(squad.id)
+          return (
+            <span className="text-muted-foreground">
+              {lead ? personDisplayName(lead, currentDesignerId) : "–"}
+            </span>
+          )
+        },
+      },
+      {
+        key: "members",
+        header: "Members",
+        cell: (squad) => {
+          const memberCount = getSquadMembers(squad.id).length
+          return memberCount === 0 ? (
+            <EmptyFieldAction
+              label="0 designers"
+              actionLabel="Add member"
+              onClick={() => setAddingToSquadId(squad.id)}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setManagingSquadId(squad.id)}
+              className="rounded-sm text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              {memberCount} {memberCount === 1 ? "designer" : "designers"}
+              <span className="sr-only"> — manage members</span>
+            </button>
+          )
+        },
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (squad) => <EntityStatusBadge status={squad.status} />,
+      },
+      {
+        key: "actions",
+        header: <span className="sr-only">Actions</span>,
+        width: "56px",
+        align: "right",
+        cell: (squad) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
+              <MoreHorizontal />
+              <span className="sr-only">Squad actions</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => openEditDialog(squad)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAddingToSquadId(squad.id)}>
+                Add member
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setManagingSquadId(squad.id)}>
+                Manage members
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => handleToggleStatus(squad)}>
+                {squad.status === "Active" ? "Deactivate" : "Activate"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => setDeletingSquad(squad)}>
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+      },
+    ],
+    [currentDesignerId, handleToggleStatus]
+  )
+
+  const tableHeight = Math.min(560, (filteredSquads.length + 1) * 48)
 
   return (
     <div className="space-y-6">
@@ -158,70 +253,13 @@ export default function SquadsPage() {
                 }
               />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Squad Name</TableHead>
-                    <TableHead>Squad Lead</TableHead>
-                    <TableHead>Members</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-10">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredSquads.map((squad) => {
-                    const lead = getSquadLead(squad.id)
-                    const memberCount = getSquadMembers(squad.id).length
-                    return (
-                      <TableRow key={squad.id}>
-                        <TableCell>
-                          <button
-                            type="button"
-                            onClick={() => setViewingSquad(squad)}
-                            className="font-medium text-foreground underline-offset-2 hover:underline"
-                          >
-                            {squad.name}
-                          </button>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {lead ? personDisplayName(lead, currentDesignerId) : "–"}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {memberCount} {memberCount === 1 ? "designer" : "designers"}
-                        </TableCell>
-                        <TableCell>
-                          <EntityStatusBadge status={squad.status} />
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
-                              <MoreHorizontal />
-                              <span className="sr-only">Squad actions</span>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => openEditDialog(squad)}>
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setViewingSquad(squad)}>
-                                View members
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleToggleStatus(squad)}>
-                                {squad.status === "Active" ? "Deactivate" : "Activate"}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem variant="destructive" onClick={() => setDeletingSquad(squad)}>
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+              <Table
+                data={filteredSquads}
+                columns={columns}
+                getRowId={(squad) => squad.id}
+                defaultSort={{ key: "name", direction: "asc" }}
+                height={tableHeight}
+              />
             )}
           </>
         )}
@@ -235,12 +273,26 @@ export default function SquadsPage() {
         onSaved={refresh}
       />
 
-      <SquadMembersDialog
-        squad={viewingSquad}
+      <ManageSquadMembersDialog
+        squadId={managingSquadId}
         onOpenChange={(open) => {
-          if (!open) setViewingSquad(null)
+          if (!open) setManagingSquadId(null)
         }}
+        squads={squads ?? []}
+        designers={designers ?? []}
       />
+
+      {addingToSquad ? (
+        <AddSquadMembersDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setAddingToSquadId(null)
+          }}
+          squad={addingToSquad}
+          designers={designers ?? []}
+          squads={squads ?? []}
+        />
+      ) : null}
 
       {deletingSquad ? (
         <DeleteEntityDialog
@@ -378,60 +430,6 @@ function SquadFormDialog({
           <Button onClick={handleSave} disabled={!canSave}>
             {isEdit ? "Save Changes" : "Create Squad"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-interface SquadMembersDialogProps {
-  squad: Squad | null
-  onOpenChange: (open: boolean) => void
-}
-
-/** Read-only membership view — derived live from Designer.home_squad_id.
- * There is intentionally no add/remove control here. */
-function SquadMembersDialog({ squad, onOpenChange }: SquadMembersDialogProps) {
-  const currentDesignerId = useCurrentDesignerId()
-  const members = squad ? getSquadMembers(squad.id) : []
-  const lead = squad ? getSquadLead(squad.id) : undefined
-
-  return (
-    <Dialog open={squad !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{squad?.name}</DialogTitle>
-          <DialogDescription>
-            Squad Lead: {lead ? personDisplayName(lead, currentDesignerId) : "Unassigned"}
-          </DialogDescription>
-        </DialogHeader>
-
-        {members.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            No designers currently have this as their Home Squad.
-          </p>
-        ) : (
-          <ul className="max-h-72 divide-y divide-border overflow-y-auto rounded-md border border-border">
-            {members.map((member) => (
-              <li key={member.id} className="flex items-center gap-3 px-3 py-2">
-                <PersonAvatar person={member} size="sm" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">
-                    {personDisplayName(member, currentDesignerId)}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">{member.job_title}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <p className="text-xs text-muted-foreground">
-          Membership is set from each designer&apos;s Home Squad. It can&apos;t be edited here.
-        </p>
-
-        <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>Close</DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

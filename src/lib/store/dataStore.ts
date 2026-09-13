@@ -29,6 +29,8 @@ export const TABLES = [
   "project_assignments",
   "project_monthly_targets",
   "project_weekly_focus",
+  // Shared (non-home) squad membership — Teams → Squad View (docs/PRD.MD §13.1).
+  "squad_designer_memberships",
   // Account rows, cached alongside the planning tables so the signed-in user's
   // identity and preferences are readable synchronously wherever the rest of
   // the data is — which is what lets Settings render filled-in on first paint

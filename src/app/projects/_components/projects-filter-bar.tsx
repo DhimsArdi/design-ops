@@ -3,19 +3,23 @@
 //
 // Layout, search box, the "Clear filters" action and the chip row all come
 // from the shared <FilterBar> (components/shared/filter-bar.tsx); this file
-// only supplies the Projects-specific controls and chip definitions.
+// only supplies the Projects-specific controls and chip definitions. The
+// view switcher (Board/List/Table) is passed in as `viewSwitcher` and
+// rendered by <FilterBar> in the same row as Search/Filters — see
+// docs/DECISIONS.md (global filter toolbar simplification).
 //
 // Interaction model:
-// - Search, Status, Priority, Department are quick filters, always live
-//   (every change applies immediately).
+// - Search, Needs Allocation, Status, Priority, Department are quick
+//   filters, always live (every change applies immediately). None of them
+//   render as standalone toolbar buttons any more — every dimension lives
+//   inside the single "Filters" button so the toolbar never shows the same
+//   filter twice (docs/DECISIONS.md).
 // - Epic, Owner Squad, Design Lead, Timeline, Health, and Show archived are
 //   "advanced" — staged in the Filters popover and only take effect on
 //   Apply (or are cleared immediately by Reset), matching the panel's
 //   Reset/Apply footer.
-// - Status/Priority/Department are *also* rendered (as live, non-staged
-//   rows) at the top of the Filters popover, so they stay reachable once
-//   their toolbar button is responsively hidden on narrower layouts — see
-//   the `hidden md:…` / `hidden lg:…` classes below.
+// - The Filters button's badge counts every active dimension (quick +
+//   advanced), since it's now the toolbar's only indicator of active state.
 //
 // Every control inside the Filters popover uses `variant="inline"`
 // (expands in normal flow, no nested Popover) — nesting a second
@@ -38,7 +42,7 @@ import { FilterChip } from "@/components/shared/filter-chip"
 import { FilterMultiSelect, type FilterMultiSelectOption } from "@/components/shared/filter-multiselect"
 import { FilterSelect, type FilterSelectOption } from "@/components/shared/filter-select"
 
-import { PRIORITIES, PROJECT_HEALTHS, PROJECT_STATUSES } from "@/lib/domain/enums"
+import { PRIORITIES, PROJECT_HEALTHS, PROJECT_STATUS_LABELS, PROJECT_STATUSES } from "@/lib/domain/enums"
 import type { Priority, ProjectHealth, ProjectStatus } from "@/lib/domain/enums"
 import type { Project } from "@/lib/domain/types"
 import { UNASSIGNED_DESIGN_LEAD } from "@/lib/selectors/projectSelectors"
@@ -56,6 +60,11 @@ interface ProjectFilters {
   health: ProjectHealth | "all"
   timeline: TimelineFilter
   showArchived: boolean
+  /** Quick filter: no designer at all (Lead nor Support) — the same
+   * predicate that gates "Start project" on the Board (§4 of the revamp
+   * plan). Distinct from `designLead: UNASSIGNED_DESIGN_LEAD` above, which
+   * is Lead-only and powers Overview's separate "Unassigned Projects" KPI. */
+  needsAllocation: boolean
 }
 
 const DEFAULT_FILTERS: ProjectFilters = {
@@ -69,11 +78,12 @@ const DEFAULT_FILTERS: ProjectFilters = {
   health: "all",
   timeline: "all",
   showArchived: false,
+  needsAllocation: false,
 }
 
 const STATUS_OPTIONS: FilterMultiSelectOption[] = PROJECT_STATUSES.map((status) => ({
   value: status,
-  label: status,
+  label: PROJECT_STATUS_LABELS[status],
 }))
 const PRIORITY_OPTIONS: FilterMultiSelectOption[] = PRIORITIES.map((priority) => ({
   value: priority,
@@ -118,9 +128,8 @@ interface ProjectsFilterBarProps {
   epicOptions: FilterSelectOption[]
   squadOptions: FilterSelectOption[]
   designerOptions: FilterSelectOption[]
-  /** The Active/Completed tabs already imply a status scope — the granular
-   * Status control is only meaningful (and only shown) inside the All tab. */
-  hideStatusFilter?: boolean
+  /** Board/List/Table — rendered by <FilterBar> in the same row as Search/Filters. */
+  viewSwitcher?: ReactNode
 }
 
 function ProjectsFilterBar({
@@ -132,9 +141,13 @@ function ProjectsFilterBar({
   epicOptions,
   squadOptions,
   designerOptions,
-  hideStatusFilter,
+  viewSwitcher,
 }: ProjectsFilterBarProps) {
-  const advancedFilterCount = [
+  const activeFilterCount = [
+    filters.needsAllocation,
+    filters.status.length > 0,
+    filters.priority.length > 0,
+    filters.department !== "all",
     filters.epic !== "all",
     filters.squad !== "all",
     filters.designLead !== "all",
@@ -148,14 +161,14 @@ function ProjectsFilterBar({
   const squadLabel = squadOptions.find((option) => option.value === filters.squad)?.label
   const designLeadLabel =
     filters.designLead === UNASSIGNED_DESIGN_LEAD
-      ? "Unassigned"
+      ? "No Design Lead"
       : designerOptions.find((option) => option.value === filters.designLead)?.label
   const timelineLabel = TIMELINE_OPTIONS.find((option) => option.value === filters.timeline)?.label
 
   const chips: { key: string; label: string; onRemove: () => void }[] = [
     ...filters.status.map((status) => ({
       key: `status-${status}`,
-      label: `Status: ${status}`,
+      label: `Status: ${PROJECT_STATUS_LABELS[status]}`,
       onRemove: () => onFiltersChange({ status: filters.status.filter((value) => value !== status) }),
     })),
     ...filters.priority.map((priority) => ({
@@ -164,6 +177,13 @@ function ProjectsFilterBar({
       onRemove: () => onFiltersChange({ priority: filters.priority.filter((value) => value !== priority) }),
     })),
   ]
+  if (filters.needsAllocation) {
+    chips.push({
+      key: "needsAllocation",
+      label: "Needs Allocation",
+      onRemove: () => onFiltersChange({ needsAllocation: false }),
+    })
+  }
   if (filters.department !== "all" && departmentLabel) {
     chips.push({
       key: "department",
@@ -204,6 +224,7 @@ function ProjectsFilterBar({
 
   return (
     <FilterBar
+      leading={viewSwitcher}
       search={{
         value: filters.search,
         onChange: (value) => onFiltersChange({ search: value }),
@@ -217,41 +238,14 @@ function ProjectsFilterBar({
           : undefined
       }
     >
-      {!hideStatusFilter ? (
-        <FilterMultiSelect
-          label="Status"
-          options={STATUS_OPTIONS}
-          selected={filters.status}
-          onChange={(status) => onFiltersChange({ status: status as ProjectStatus[] })}
-          className="hidden md:inline-flex"
-        />
-      ) : null}
-      <FilterMultiSelect
-        label="Priority"
-        options={PRIORITY_OPTIONS}
-        selected={filters.priority}
-        onChange={(priority) => onFiltersChange({ priority: priority as Priority[] })}
-        className="hidden md:inline-flex"
-      />
-      <FilterSelect
-        label="Department"
-        allLabel="All departments"
-        triggerPlaceholder="Department"
-        options={departmentOptions}
-        value={filters.department}
-        onChange={(department) => onFiltersChange({ department })}
-        className="hidden lg:inline-flex"
-      />
-
       <AdvancedFiltersPopover
         filters={filters}
         onFiltersChange={onFiltersChange}
-        advancedFilterCount={advancedFilterCount}
+        activeFilterCount={activeFilterCount}
         departmentOptions={departmentOptions}
         epicOptions={epicOptions}
         squadOptions={squadOptions}
         designerOptions={designerOptions}
-        hideStatusFilter={hideStatusFilter}
       />
     </FilterBar>
   )
@@ -289,23 +283,21 @@ function draftFromFilters(filters: ProjectFilters): AdvancedDraft {
 interface AdvancedFiltersPopoverProps {
   filters: ProjectFilters
   onFiltersChange: (patch: Partial<ProjectFilters>) => void
-  advancedFilterCount: number
+  activeFilterCount: number
   departmentOptions: FilterSelectOption[]
   epicOptions: FilterSelectOption[]
   squadOptions: FilterSelectOption[]
   designerOptions: FilterSelectOption[]
-  hideStatusFilter?: boolean
 }
 
 function AdvancedFiltersPopover({
   filters,
   onFiltersChange,
-  advancedFilterCount,
+  activeFilterCount,
   departmentOptions,
   epicOptions,
   squadOptions,
   designerOptions,
-  hideStatusFilter,
 }: AdvancedFiltersPopoverProps) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<AdvancedDraft>(() => draftFromFilters(filters))
@@ -337,13 +329,17 @@ function AdvancedFiltersPopover({
           <Button
             variant="outline"
             size="sm"
-            className={advancedFilterCount > 0 ? "text-foreground" : "text-muted-foreground"}
+            className={activeFilterCount > 0 ? "text-foreground" : "text-muted-foreground"}
           />
         }
       >
         <SlidersHorizontal />
         Filters
-        {advancedFilterCount > 0 ? <span className="text-foreground">{advancedFilterCount}</span> : null}
+        {activeFilterCount > 0 ? (
+          <span className="text-muted-foreground">
+            · <span className="text-foreground tabular-nums">{activeFilterCount}</span>
+          </span>
+        ) : null}
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96 p-0">
         <div className="max-h-[70vh] overflow-y-auto p-3">
@@ -351,15 +347,20 @@ function AdvancedFiltersPopover({
 
           <div className="space-y-1">
             <p className="px-1 text-xs font-medium text-muted-foreground">Quick filters</p>
-            {!hideStatusFilter ? (
-              <FilterMultiSelect
-                label="Status"
-                options={STATUS_OPTIONS}
-                selected={filters.status}
-                onChange={(status) => onFiltersChange({ status: status as ProjectStatus[] })}
-                variant="inline"
+            <Label className="flex items-center gap-2 px-1 py-1 font-normal">
+              <Switch
+                checked={filters.needsAllocation}
+                onCheckedChange={(needsAllocation) => onFiltersChange({ needsAllocation })}
               />
-            ) : null}
+              Needs Allocation
+            </Label>
+            <FilterMultiSelect
+              label="Status"
+              options={STATUS_OPTIONS}
+              selected={filters.status}
+              onChange={(status) => onFiltersChange({ status: status as ProjectStatus[] })}
+              variant="inline"
+            />
             <FilterMultiSelect
               label="Priority"
               options={PRIORITY_OPTIONS}
@@ -406,7 +407,7 @@ function AdvancedFiltersPopover({
               <FilterSelect
                 label="Design Lead"
                 allLabel="All design leads"
-                options={[{ value: UNASSIGNED_DESIGN_LEAD, label: "Unassigned" }, ...designerOptions]}
+                options={[{ value: UNASSIGNED_DESIGN_LEAD, label: "No Design Lead" }, ...designerOptions]}
                 value={draft.designLead}
                 onChange={(designLead) => patchDraft({ designLead })}
                 searchable

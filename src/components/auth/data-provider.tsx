@@ -12,9 +12,11 @@ import type { Session } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase/client"
 import { loadAll, subscribeRealtime } from "@/lib/store/dataStore"
 import * as profileRepository from "@/lib/repositories/profileRepository"
-import { AuthUserProvider } from "@/lib/identity/current-user"
+import { AuthUserProvider, useCurrentUser } from "@/lib/identity/current-user"
+import { Loader } from "@/components/motion/loader"
 import { ThemeSync } from "@/components/shell/theme-sync"
 import { LoginView } from "./login-view"
+import { needsOnboarding, OnboardingView } from "./onboarding-view"
 
 type Phase =
   | { kind: "checking" }
@@ -34,6 +36,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // those as a new sign-in would drop the app back to "loading" for a user id
   // the effect below has already loaded, and nothing would ever finish it.
   const currentUserId = useRef<string | undefined>(undefined)
+  const hasSeenFirstEvent = useRef(false)
 
   // Fires once with the restored session on subscribe, so it covers the
   // initial check as well as later sign-in/sign-out.
@@ -42,7 +45,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setSession(next)
 
       const nextUserId = next?.user.id
-      if (nextUserId === currentUserId.current) return
+      // The first event must always move the phase off "checking", even for a
+      // signed-out visitor, where nextUserId (undefined) would otherwise equal
+      // the ref's untouched initial value and short-circuit below.
+      if (nextUserId === currentUserId.current && hasSeenFirstEvent.current) return
+      hasSeenFirstEvent.current = true
       currentUserId.current = nextUserId
       setPhase(nextUserId ? { kind: "loading" } : { kind: "signed-out" })
     })
@@ -76,10 +83,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       },
       (error: unknown) => {
         if (cancelled) return
-        setPhase({
-          kind: "failed",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })
+        setPhase({ kind: "failed", message: describeError(error) })
       },
     )
 
@@ -109,16 +113,53 @@ export function DataProvider({ children }: { children: ReactNode }) {
     )
   }
 
-  if (phase.kind !== "ready" || !userId) return <BootMessage title="Loading…" />
+  if (phase.kind !== "ready" || !userId) {
+    return (
+      <div className="flex min-h-svh flex-col items-center justify-center gap-2 p-6 text-center">
+        <Loader variant="scramble" />
+      </div>
+    )
+  }
 
   return (
     <AuthUserProvider user={{ id: userId, email }}>
       {/* Applies the account's theme preference once the profile is in the
           cache, and follows the OS from then on while it is "system". */}
       <ThemeSync />
-      {children}
+      <OnboardingGate>{children}</OnboardingGate>
     </AuthUserProvider>
   )
+}
+
+/**
+ * Stands in for the app until this account has chosen a Design role
+ * (`needsOnboarding`, docs/PRD.MD §6.1). A separate component so it can call
+ * `useCurrentUser`, which needs the `AuthUserProvider` above it in the tree.
+ */
+function OnboardingGate({ children }: { children: ReactNode }) {
+  const currentUser = useCurrentUser()
+  if (currentUser && needsOnboarding(currentUser.profile)) return <OnboardingView />
+  return <>{children}</>
+}
+
+/**
+ * PostgrestError (thrown by dataStore's fetchTable) is a plain `{message,
+ * details, hint, code}` object, not a real `Error` — `instanceof Error` on one
+ * is always false, which used to make every load failure here show the same
+ * unhelpful "Unknown error" regardless of what actually went wrong.
+ */
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string" &&
+    (error as { message: string }).message
+  ) {
+    return (error as { message: string }).message
+  }
+  return "Unknown error"
 }
 
 /** "dimas.aditya@bni.co.id" -> "Dimas Aditya". A first value for a name field the user then owns — the same rule the database trigger uses. */

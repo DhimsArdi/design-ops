@@ -19,6 +19,19 @@ export const PROJECT_STATUSES = [
 ] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
+// Display-only relabeling for the Projects Board/List/Table revamp
+// (docs/DECISIONS.md): the stored enum above is unchanged (no migration) —
+// every screen that renders a status renders this label instead of the raw
+// value. "Planning" reads as "To Do" and "Completed" reads as "Done"; the
+// other three keep their own name as their label.
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  Planning: "To Do",
+  "In Progress": "In Progress",
+  "On Hold": "On Hold",
+  Completed: "Done",
+  Cancelled: "Cancelled",
+};
+
 export const PROJECT_HEALTHS = ["On Track", "At Risk", "Blocked"] as const;
 export type ProjectHealth = (typeof PROJECT_HEALTHS)[number];
 
@@ -68,6 +81,11 @@ export type EntityStatus = (typeof ENTITY_STATUSES)[number];
 // Deliberately NOT the same axis as Designer.seniority (Junior/Mid/Senior),
 // which grades the same job rather than naming a different one, and deliberately
 // NOT the same axis as SystemRole below.
+//
+// "Department Head" is the odd one out here: every other value makes this
+// account a Designer (Team profile links to a Designer row), but this one
+// makes it a Stakeholder instead (stakeholder_type = "Department Head") —
+// see docs/DECISIONS.md. The two are mutually exclusive by construction.
 export const DESIGN_ROLES = [
   "Product Designer",
   "UX Designer",
@@ -76,6 +94,7 @@ export const DESIGN_ROLES = [
   "Design Lead",
   "Design Manager",
   "Design Ops",
+  "Department Head",
   "Other",
 ] as const;
 export type DesignRole = (typeof DESIGN_ROLES)[number];

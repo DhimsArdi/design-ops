@@ -163,7 +163,7 @@ export function SquadDetailView({ squadId }: SquadDetailViewProps) {
         />
         <Button variant="outline" render={<Link href="/teams" />} nativeButton={false}>
           <ArrowLeft />
-          Back to Teams
+          Back to Squads
         </Button>
       </div>
     )

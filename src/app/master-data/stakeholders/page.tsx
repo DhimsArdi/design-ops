@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { toast } from "sonner"
 import { MoreHorizontal, Plus, SearchX, Users } from "lucide-react"
 
@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
 import { FilterBar } from "@/components/shared/filter-bar"
 import { FilterSelect, type FilterSelectOption } from "@/components/shared/filter-select"
+import { VerifiedBadge } from "@/components/shared/verified-badge"
 import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -37,19 +38,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table } from "@/components/motion/table"
+import type { TableColumn } from "@/components/motion/table"
 import { STAKEHOLDER_TYPES, type StakeholderType } from "@/lib/domain/enums"
-import type { Department, Stakeholder } from "@/lib/domain/types"
+import type { Department, Profile, Stakeholder } from "@/lib/domain/types"
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
 import { subscribe } from "@/lib/store/dataStore"
 import * as departmentRepository from "@/lib/repositories/departmentRepository"
+import * as profileRepository from "@/lib/repositories/profileRepository"
 import * as stakeholderRepository from "@/lib/repositories/stakeholderRepository"
 import { getStakeholderUsage } from "@/lib/selectors/stakeholderSelectors"
 
@@ -83,6 +79,9 @@ const TYPE_OPTIONS: FilterSelectOption[] = STAKEHOLDER_TYPES.map((type) => ({
 export default function StakeholdersPage() {
   const [stakeholders, setStakeholders] = useState<Stakeholder[] | null>(null)
   const [departments, setDepartments] = useState<Department[] | null>(null)
+  // Read alongside the two tables above so the Verified badge (isStakeholderVerified)
+  // updates live when someone finishes onboarding and claims a row.
+  const [profiles, setProfiles] = useState<Profile[]>([])
 
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebouncedValue(search, 250)
@@ -98,6 +97,7 @@ export default function StakeholdersPage() {
     function read() {
       setStakeholders(stakeholderRepository.getAll())
       setDepartments(departmentRepository.getAll())
+      setProfiles(profileRepository.getAll())
     }
     // Reads both tables now and again on every change to the shared cache, so
     // this page follows edits made elsewhere (docs/DECISIONS.md). Subscribes to
@@ -213,6 +213,18 @@ export default function StakeholdersPage() {
         ]
       : activeDepartments
 
+  // Precomputed once per profiles change rather than calling isStakeholderVerified
+  // per row — same shape as departmentNameById above.
+  const verifiedStakeholderIds = useMemo(
+    () =>
+      new Set(
+        profiles
+          .map((profile) => profile.stakeholder_id)
+          .filter((id): id is string => id !== null)
+      ),
+    [profiles]
+  )
+
   const filteredStakeholders = (stakeholders ?? []).filter((stakeholder) => {
     const query = debouncedSearch.trim().toLowerCase()
     const matchesSearch =
@@ -225,6 +237,78 @@ export default function StakeholdersPage() {
 
   const hasAnyStakeholders = (stakeholders ?? []).length > 0
   const hasFiltersApplied = search.trim().length > 0 || typeFilter !== "all"
+
+  const columns = useMemo<TableColumn<Stakeholder>[]>(
+    () => [
+      {
+        key: "name",
+        header: "Name",
+        sortable: true,
+        cell: (stakeholder) => (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="font-medium text-foreground">{stakeholder.name}</span>
+            {verifiedStakeholderIds.has(stakeholder.id) ? <VerifiedBadge /> : null}
+          </span>
+        ),
+      },
+      {
+        key: "title",
+        header: "Title",
+        cell: (stakeholder) => (
+          <span className="text-muted-foreground">{stakeholder.title || "–"}</span>
+        ),
+      },
+      {
+        key: "department",
+        header: "Department",
+        cell: (stakeholder) => (
+          <span className="text-muted-foreground">
+            {departmentNameById.get(stakeholder.department_id) ?? "–"}
+          </span>
+        ),
+      },
+      {
+        key: "type",
+        header: "Type",
+        cell: (stakeholder) => <Badge variant="outline">{stakeholder.stakeholder_type}</Badge>,
+      },
+      {
+        key: "status",
+        header: "Status",
+        cell: (stakeholder) => <EntityStatusBadge status={stakeholder.status} />,
+      },
+      {
+        key: "actions",
+        header: <span className="sr-only">Actions</span>,
+        width: "56px",
+        align: "right",
+        cell: (stakeholder) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
+              <MoreHorizontal />
+              <span className="sr-only">Actions for {stakeholder.name}</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => openEditDialog(stakeholder)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleToggleStatus(stakeholder)}>
+                {stakeholder.status === "Active" ? "Deactivate" : "Activate"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => setDeletingStakeholder(stakeholder)}
+              >
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+      },
+    ],
+    [departmentNameById, handleToggleStatus, verifiedStakeholderIds]
+  )
+
+  const tableHeight = Math.min(560, (filteredStakeholders.length + 1) * 48)
 
   return (
     <div className="space-y-6">
@@ -284,64 +368,13 @@ export default function StakeholdersPage() {
                 }
               />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-10">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredStakeholders.map((stakeholder) => (
-                    <TableRow key={stakeholder.id} className="hover:bg-transparent">
-                      <TableCell className="font-medium text-foreground">
-                        {stakeholder.name}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {stakeholder.title || "–"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {departmentNameById.get(stakeholder.department_id) ?? "–"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{stakeholder.stakeholder_type}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <EntityStatusBadge status={stakeholder.status} />
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
-                            <MoreHorizontal />
-                            <span className="sr-only">Actions for {stakeholder.name}</span>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditDialog(stakeholder)}>
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleToggleStatus(stakeholder)}>
-                              {stakeholder.status === "Active" ? "Deactivate" : "Activate"}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              variant="destructive"
-                              onClick={() => setDeletingStakeholder(stakeholder)}
-                            >
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <Table
+                data={filteredStakeholders}
+                columns={columns}
+                getRowId={(stakeholder) => stakeholder.id}
+                defaultSort={{ key: "name", direction: "asc" }}
+                height={tableHeight}
+              />
             )}
           </>
         )}

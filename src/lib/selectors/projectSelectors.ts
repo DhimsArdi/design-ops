@@ -94,6 +94,38 @@ export function getUnassignedProjects(): Project[] {
 export const UNASSIGNED_DESIGN_LEAD = "unassigned";
 
 /**
+ * The Board's "Start project" gate (Projects page revamp): true once at
+ * least one designer — Lead OR Support — is assigned. Lead and Support are
+ * both just a role on a ProjectAssignment row pointing at a Designer (see
+ * PROJECT_ROLES, docs/lib/domain/enums.ts) — there is no separate
+ * "supervisory, non-designer" entity in this app, so a Lead-only assignment
+ * is a fully valid "at least one responsible designer" state on its own.
+ * Distinct from the Lead-only `getUnassignedProjects()`/UNASSIGNED_DESIGN_LEAD
+ * above, which is a separate, already-established concept (Overview's KPI).
+ */
+export function canStartProject(projectId: string): boolean {
+  return getProjectAssignments(projectId).length > 0
+}
+
+/**
+ * Every non-archived project this designer is assigned to, Lead or Support
+ * (Squad View / Designer Details Sheet). Mirrors the archived-exclusion
+ * convention used everywhere else assignments are read (Overview, Timeline,
+ * People, docs/PRD.MD §14.5).
+ */
+export function getDesignerProjects(designerId: string): Project[] {
+  const projectIds = new Set(
+    projectAssignmentRepository
+      .getAll()
+      .filter((assignment) => assignment.designer_id === designerId)
+      .map((assignment) => assignment.project_id),
+  );
+  return projectRepository
+    .getAll()
+    .filter((project) => projectIds.has(project.id) && !project.is_archived);
+}
+
+/**
  * All Project Weekly Focus rows for one project (docs/PRD.MD §8.9), sorted
  * chronologically by week. A project with none returns an empty array — a
  * normal state, not an error.

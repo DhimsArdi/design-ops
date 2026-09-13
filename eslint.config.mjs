@@ -20,6 +20,10 @@ const eslintConfig = defineConfig([
     // next upgrade overwrites. Our own adapter around it, in
     // src/app/timeline/_components/, is linted normally.
     "src/components/reui/**",
+    // Same rationale, for the @beui data-table + loader components installed
+    // from beui.dev via `npx shadcn add`. Pages that consume them (Master
+    // Data, Projects, People) are linted normally.
+    "src/components/motion/**",
   ]),
 ]);
 

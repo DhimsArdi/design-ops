@@ -3,6 +3,7 @@
 // at the call site before it's ever invoked (docs/DECISIONS.md).
 
 import { createRemovableRepository } from "./createRepository";
+import { supabase } from "@/lib/supabase/client";
 import * as store from "@/lib/store/dataStore";
 import * as departmentRepository from "./departmentRepository";
 import * as projectRepository from "./projectRepository";
@@ -13,6 +14,21 @@ import type { EntityStatus } from "@/lib/domain/enums";
 const repo = createRemovableRepository<Stakeholder>("stakeholders");
 
 export const { getAll, getById, create, update, remove } = repo;
+
+/**
+ * Creates a Stakeholder and waits for Supabase to confirm the insert before
+ * returning — the Stakeholder-side twin of `designerRepository.createAwaited`.
+ * Needed for the same reason: `profiles.stakeholder_id` is a foreign key, and
+ * the awaited profile write that sets it has to run after this row genuinely
+ * exists in the database, not just in the optimistic cache.
+ */
+export async function createAwaited(data: Omit<Stakeholder, "id">): Promise<Stakeholder> {
+  const record: Stakeholder = { ...data, id: crypto.randomUUID() };
+  const { error } = await supabase.from("stakeholders").insert(record);
+  if (error) throw new Error(error.message);
+  store.setLocal("stakeholders", [...getAll(), record]);
+  return record;
+}
 
 /** Strips this stakeholder out of a project, or returns the project untouched. */
 function withoutStakeholder(project: Project, id: string): Project {

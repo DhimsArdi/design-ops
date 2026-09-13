@@ -41,18 +41,31 @@ export interface Profile {
   // Image URL. Null until an avatar is uploaded — initials are derived from
   // full_name for display, exactly as Designer.avatar already works (§8.1).
   avatar_url: string | null;
-  job_title: string;
 
-  // What this person does. Null until they choose one.
+  // What this person does. Null until they choose one. "Department Head" is
+  // the one value that does not make this account a Designer — it makes it a
+  // Stakeholder instead (see stakeholder_id below, docs/DECISIONS.md).
   design_role: DesignRole | null;
   // What this account may do. Never writable by its own user — that is
   // enforced by column privileges in supabase/schema.sql, not by the UI.
   system_role: SystemRole;
 
-  // The Designer row this account is. Null for an account with no person
-  // record, which is a complete working account — it just doesn't appear in
-  // the people pickers (Squad Lead, Supporting Designers).
+  // This account's own department, chosen in Settings → Profile. Feeds the
+  // Stakeholder record created for a "Department Head" design_role, and is
+  // otherwise just a personal detail — replaces the old free-text job_title
+  // field, which the app no longer collects (docs/DECISIONS.md).
+  department_id: string | null;
+
+  // The Designer row this account is, when design_role is a designer-type
+  // role. Null for an account with no person record, which is a complete
+  // working account — it just doesn't appear in the people pickers (Squad
+  // Lead, Supporting Designers).
   designer_id: string | null;
+  // The Stakeholder row this account is, when design_role is "Department
+  // Head". Mutually exclusive with designer_id in practice: an account is
+  // either the person behind a Designer row or behind a Department Head
+  // Stakeholder row, never both (docs/DECISIONS.md).
+  stakeholder_id: string | null;
 
   language: Language;
   // IANA zone name.
@@ -165,6 +178,20 @@ export interface Project {
 
   // No project-design-lead field here on purpose: it is always derived from
   // ProjectAssignment rows where project_role = "Lead" (see docs/DECISIONS.md).
+}
+
+/**
+ * A designer's SHARED (non-home) squad membership — Teams § Squad View
+ * (docs/PRD.MD §13.1). A designer's Primary Squad is still exactly
+ * `Designer.home_squad_id`; this row only ever records an *additional* squad
+ * they've been shared into. Deliberately independent of ProjectAssignment —
+ * sharing a designer into a squad's roster does not require a project, and a
+ * cross-squad project assignment does not, by itself, create one of these.
+ */
+export interface SquadDesignerMembership {
+  id: string;
+  designer_id: string;
+  squad_id: string;
 }
 
 export interface ProjectAssignment {

@@ -14,7 +14,7 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase/client";
 import * as store from "@/lib/store/dataStore";
-import type { Designer, Profile } from "@/lib/domain/types";
+import type { Designer, Profile, Stakeholder } from "@/lib/domain/types";
 
 const TABLE = "profiles" as const;
 
@@ -24,9 +24,10 @@ export type ProfilePatch = Partial<
     Profile,
     | "full_name"
     | "avatar_url"
-    | "job_title"
     | "design_role"
+    | "department_id"
     | "designer_id"
+    | "stakeholder_id"
     | "language"
     | "timezone"
     | "week_starts_on"
@@ -118,51 +119,69 @@ export async function ensure(id: string, fallbackName: string): Promise<Profile>
 }
 
 /**
- * Saves the identity fields from Settings → Profile, and — when this account is
- * linked to a Designer — writes the same name and job title through to that
- * person record.
+ * Saves the identity fields from Settings → Profile, and — when this account
+ * is linked to a Designer or a Stakeholder — writes the same name through to
+ * that person record. At most one of `linkedDesignerId`/`linkedStakeholderId`
+ * is expected to be non-null at a time (docs/DECISIONS.md), matching whichever
+ * table `patch.designer_id`/`patch.stakeholder_id` just pointed at.
  *
  * The mirror is deliberate and one-way (docs/DECISIONS.md). `profiles` has to
- * hold these values regardless, because an account with no person record still
- * has a name; the Designer row has to hold them too, because that row is what
- * every planning screen renders — a squad list showing a name the person
- * themselves has already corrected in Settings is the bug this prevents.
+ * hold the name regardless, because an account with no person record still has
+ * one; the Designer/Stakeholder row has to hold it too, because that row is
+ * what every planning screen renders — a squad list or a project's stakeholder
+ * field showing a name the person themselves has already corrected in Settings
+ * is the bug this prevents.
  *
- * Both writes are awaited. If the designer write fails the profile write stands,
- * and the error surfaces — this is one person editing their own name, not a
- * transaction worth a stored procedure.
+ * Both writes are awaited. If the person-record write fails the profile write
+ * stands, and the error surfaces — this is one person editing their own name,
+ * not a transaction worth a stored procedure.
  */
 export async function saveIdentity(
   id: string,
   patch: ProfilePatch,
   linkedDesignerId: string | null,
+  linkedStakeholderId: string | null,
 ): Promise<Profile> {
   const saved = await save(id, patch);
 
   const mirrorsName = patch.full_name !== undefined;
-  const mirrorsTitle = patch.job_title !== undefined;
-  if (!linkedDesignerId || (!mirrorsName && !mirrorsTitle)) return saved;
+  if (!mirrorsName) return saved;
 
-  const designerPatch = {
-    ...(mirrorsName ? { name: patch.full_name } : {}),
-    ...(mirrorsTitle ? { job_title: patch.job_title } : {}),
-  };
+  if (linkedDesignerId) {
+    const { data, error } = await supabase
+      .from("designers")
+      .update({ name: patch.full_name })
+      .eq("id", linkedDesignerId)
+      .select()
+      .single();
 
-  const { data, error } = await supabase
-    .from("designers")
-    .update(designerPatch)
-    .eq("id", linkedDesignerId)
-    .select()
-    .single();
+    if (error) throw new Error(describe(error));
 
-  if (error) throw new Error(describe(error));
+    const designer = data as Designer;
+    store.setLocal(
+      "designers",
+      store
+        .getTable<Designer>("designers")
+        .map((row) => (row.id === linkedDesignerId ? designer : row)),
+    );
+  } else if (linkedStakeholderId) {
+    const { data, error } = await supabase
+      .from("stakeholders")
+      .update({ name: patch.full_name })
+      .eq("id", linkedStakeholderId)
+      .select()
+      .single();
 
-  const designer = data as Designer;
-  store.setLocal(
-    "designers",
-    store
-      .getTable<Designer>("designers")
-      .map((row) => (row.id === linkedDesignerId ? designer : row)),
-  );
+    if (error) throw new Error(describe(error));
+
+    const stakeholder = data as Stakeholder;
+    store.setLocal(
+      "stakeholders",
+      store
+        .getTable<Stakeholder>("stakeholders")
+        .map((row) => (row.id === linkedStakeholderId ? stakeholder : row)),
+    );
+  }
+
   return saved;
 }
