@@ -1,18 +1,22 @@
 "use client"
 
 // Master Data — Designers (PRD §15). Create/Edit via Dialog; Active/Inactive
-// is the only lifecycle action (row menu) — no delete anywhere, per
-// docs/DECISIONS.md "No hard delete anywhere".
+// is the reversible lifecycle action, Delete is the permanent one — guarded
+// by getDesignerUsage so a designer still referenced by an assignment or a
+// squad lead can't be deleted out from under historical data
+// (docs/DECISIONS.md).
 
 import { useCallback, useMemo, useState, type FormEvent } from "react"
+import { toast } from "sonner"
 import { ArrowDown, ArrowUp, MoreHorizontal, Plus, SearchX, Users } from "lucide-react"
 
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
 import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
-import { SearchInput } from "@/components/shared/search-input"
+import { FilterBar } from "@/components/shared/filter-bar"
 import { PersonAvatar } from "@/components/shared/person-avatar"
+import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -50,7 +54,9 @@ import {
 
 import * as designerRepository from "@/lib/repositories/designerRepository"
 import * as squadRepository from "@/lib/repositories/squadRepository"
+import { getDesignerUsage } from "@/lib/selectors/designerSelectors"
 import { useRepositoryList } from "@/lib/hooks/use-repository-list"
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
 import { activeOrSelected, byName } from "@/lib/domain/optionHelpers"
 import { SENIORITIES, type Seniority } from "@/lib/domain/enums"
 import type { Designer } from "@/lib/domain/types"
@@ -87,12 +93,14 @@ export default function DesignersPage() {
   const [designers, refreshDesigners] = useRepositoryList(designerRepository)
   const [squads, refreshSquads] = useRepositoryList(squadRepository)
   const [query, setQuery] = useState("")
+  const debouncedQuery = useDebouncedValue(query, 250)
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
 
   const [isDialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<DesignerFormState>(EMPTY_FORM)
   const [errors, setErrors] = useState<DesignerFormErrors>({})
+  const [deletingDesigner, setDeletingDesigner] = useState<Designer | null>(null)
 
   const refresh = useCallback(() => {
     refreshDesigners()
@@ -105,7 +113,7 @@ export default function DesignersPage() {
   )
 
   const visibleDesigners = useMemo(() => {
-    const trimmedQuery = query.trim().toLowerCase()
+    const trimmedQuery = debouncedQuery.trim().toLowerCase()
     const matches = trimmedQuery
       ? designers.filter((designer) =>
           designer.name.toLowerCase().includes(trimmedQuery)
@@ -114,7 +122,7 @@ export default function DesignersPage() {
     const sorted = [...matches].sort((a, b) => a.name.localeCompare(b.name))
     if (sortDirection === "desc") sorted.reverse()
     return sorted
-  }, [designers, query, sortDirection])
+  }, [designers, debouncedQuery, sortDirection])
 
   // Active squads, plus the designer's current squad even if it has since gone
   // Inactive (so editing an existing designer never hides their real value).
@@ -181,15 +189,30 @@ export default function DesignersPage() {
       designerRepository.create({ ...payload, status: "Active" })
     }
 
+    toast.success(`${payload.name} ${editingId ? "updated" : "added"}`)
     refresh()
     handleDialogOpenChange(false)
   }
 
   function handleToggleStatus(designer: Designer) {
-    designerRepository.setStatus(
-      designer.id,
-      designer.status === "Active" ? "Inactive" : "Active"
-    )
+    const nextStatus = designer.status === "Active" ? "Inactive" : "Active"
+    designerRepository.setStatus(designer.id, nextStatus)
+    toast.success(`${designer.name} set to ${nextStatus}`)
+    refresh()
+  }
+
+  function handleForceDeleteConfirm() {
+    if (!deletingDesigner) return
+    designerRepository.removeCascade(deletingDesigner.id)
+    toast.success(`${deletingDesigner.name} deleted`, {
+      description: "Removed from their projects; any squad they led now has no lead.",
+    })
+  }
+
+  function handleDeleteConfirm() {
+    if (!deletingDesigner) return
+    designerRepository.remove(deletingDesigner.id)
+    toast.success(`${deletingDesigner.name} deleted`)
     refresh()
   }
 
@@ -213,10 +236,7 @@ export default function DesignersPage() {
         }
       />
 
-      <ContentSection
-        title={hasAnyDesigners ? `${visibleDesigners.length} of ${designers.length} designers` : undefined}
-        bodyClassName="space-y-4"
-      >
+      <ContentSection bodyClassName="space-y-4">
         {!hasAnyDesigners ? (
           <EmptyState
             icon={Users}
@@ -231,23 +251,19 @@ export default function DesignersPage() {
           />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <SearchInput
-                value={query}
-                onChange={setQuery}
-                placeholder="Search designers…"
-                className="w-full sm:w-64"
-              />
-            </div>
+            <FilterBar
+              search={{ value: query, onChange: setQuery, placeholder: "Search designers…" }}
+              hasFiltersApplied={query.trim() !== ""}
+              onClear={() => setQuery("")}
+            />
 
             {!hasResults ? (
               <EmptyState
                 icon={SearchX}
-                title="No designers match your search"
-                description={`Nothing matches "${query}". Try a different name.`}
+                title="No designers match these filters"
                 action={
                   <Button variant="outline" onClick={() => setQuery("")}>
-                    Clear search
+                    Clear filters
                   </Button>
                 }
               />
@@ -320,6 +336,13 @@ export default function DesignersPage() {
                               <DropdownMenuItem onClick={() => handleToggleStatus(designer)}>
                                 {designer.status === "Active" ? "Deactivate" : "Activate"}
                               </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onClick={() => setDeletingDesigner(designer)}
+                              >
+                                Delete
+                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
@@ -332,6 +355,30 @@ export default function DesignersPage() {
           </>
         )}
       </ContentSection>
+
+      {deletingDesigner ? (
+        <DeleteEntityDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setDeletingDesigner(null)
+          }}
+          entityLabel="designer"
+          entityName={deletingDesigner.name}
+          blockers={(() => {
+            const usage = getDesignerUsage(deletingDesigner.id)
+            return [
+              { label: "project assignment", count: usage.assignmentCount },
+              { label: "squad lead role", count: usage.squadLeadCount },
+            ]
+          })()}
+          onConfirm={handleDeleteConfirm}
+          force={{
+            consequence:
+              "Deleting anyway removes them from those projects and leaves any squad they led without a lead.",
+            onConfirm: handleForceDeleteConfirm,
+          }}
+        />
+      ) : null}
 
       <Dialog open={isDialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent>
@@ -424,7 +471,9 @@ export default function DesignersPage() {
                     aria-invalid={Boolean(errors.homeSquadId)}
                     aria-describedby={errors.homeSquadId ? "designer-home-squad-error" : undefined}
                   >
-                    <SelectValue placeholder="Select a squad" />
+                    <SelectValue placeholder="Select a squad">
+                      {(squadId: string) => squadOptions.find((s) => s.id === squadId)?.name ?? ""}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {squadOptions.map((squad) => (

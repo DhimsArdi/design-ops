@@ -13,6 +13,7 @@
 import { useState } from "react"
 import { AlertTriangle, Plus, X } from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/shared/date-picker"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import {
@@ -24,8 +25,10 @@ import {
 } from "@/components/ui/select"
 import { PROJECT_PHASES, type ProjectPhase } from "@/lib/domain/enums"
 import { formatWeekRangeLabel } from "@/lib/domain/weekUtils"
+import { monthOf } from "@/lib/domain/dateUtils"
 import {
   buildMonthlyTargetRows,
+  formatDateLabel,
   formatMonthLabel,
   monthlyTargetRowHasData,
   monthsInRange,
@@ -37,13 +40,13 @@ import {
 } from "./project-form-types"
 
 interface StepTimelinePlanningProps {
-  startMonth: string
-  endMonth: string
+  startDate: string
+  endDate: string
   monthlyRows: MonthlyTargetRowState[]
   weeklyFocus: WeeklyFocusItemState[]
   onRangeCommit: (next: {
-    startMonth: string
-    endMonth: string
+    startDate: string
+    endDate: string
     monthlyRows: MonthlyTargetRowState[]
     weeklyFocus: WeeklyFocusItemState[]
   }) => void
@@ -56,8 +59,8 @@ interface StepTimelinePlanningProps {
 }
 
 interface PendingRangeChange {
-  startMonth: string
-  endMonth: string
+  startDate: string
+  endDate: string
   months: string[]
   weekOptions: string[]
   droppedMonthlyRows: MonthlyTargetRowState[]
@@ -65,8 +68,8 @@ interface PendingRangeChange {
 }
 
 function StepTimelinePlanning({
-  startMonth,
-  endMonth,
+  startDate,
+  endDate,
   monthlyRows,
   weeklyFocus,
   onRangeCommit,
@@ -79,30 +82,32 @@ function StepTimelinePlanning({
   const [newWeek, setNewWeek] = useState("")
   const [newTitle, setNewTitle] = useState("")
 
-  const rangeIsValid = startMonth !== "" && endMonth !== "" && monthsInRange(startMonth, endMonth).length > 0
+  // Day-level range; the monthly-target rows below are derived from the months
+  // it spans (PRD §8.2, §22) rather than entered separately.
+  const rangeIsValid = startDate !== "" && endDate !== "" && startDate <= endDate
   const rangeError =
-    startMonth && endMonth && monthsInRange(startMonth, endMonth).length === 0
-      ? "End Month must be the same as, or after, Start Month."
+    startDate && endDate && startDate > endDate
+      ? "End Date must be the same as, or after, Start Date."
       : null
-  const weekOptions = rangeIsValid ? weekOptionsForRange(startMonth, endMonth) : []
+  const weekOptions = rangeIsValid ? weekOptionsForRange(monthOf(startDate), monthOf(endDate)) : []
 
   function tryApplyRange(nextStart: string, nextEnd: string) {
     setPending(null)
 
     if (!nextStart || !nextEnd) {
-      onRangeCommit({ startMonth: nextStart, endMonth: nextEnd, monthlyRows, weeklyFocus })
+      onRangeCommit({ startDate: nextStart, endDate: nextEnd, monthlyRows, weeklyFocus })
       return
     }
 
-    const months = monthsInRange(nextStart, nextEnd)
-    if (months.length === 0) {
+    if (nextStart > nextEnd) {
       // Invalid range (end before start) — surface the input + inline error,
       // leave the row data alone until it's valid again.
-      onRangeCommit({ startMonth: nextStart, endMonth: nextEnd, monthlyRows, weeklyFocus })
+      onRangeCommit({ startDate: nextStart, endDate: nextEnd, monthlyRows, weeklyFocus })
       return
     }
 
-    const nextWeekOptions = weekOptionsForRange(nextStart, nextEnd)
+    const months = monthsInRange(monthOf(nextStart), monthOf(nextEnd))
+    const nextWeekOptions = weekOptionsForRange(monthOf(nextStart), monthOf(nextEnd))
     const droppedMonthlyRows = monthlyRows.filter(
       (row) => !months.includes(row.month) && monthlyTargetRowHasData(row),
     )
@@ -112,8 +117,8 @@ function StepTimelinePlanning({
 
     if (droppedMonthlyRows.length > 0 || droppedWeeklyFocus.length > 0) {
       setPending({
-        startMonth: nextStart,
-        endMonth: nextEnd,
+        startDate: nextStart,
+        endDate: nextEnd,
         months,
         weekOptions: nextWeekOptions,
         droppedMonthlyRows,
@@ -123,8 +128,8 @@ function StepTimelinePlanning({
     }
 
     onRangeCommit({
-      startMonth: nextStart,
-      endMonth: nextEnd,
+      startDate: nextStart,
+      endDate: nextEnd,
       monthlyRows: buildMonthlyTargetRows(months, monthlyRows),
       weeklyFocus,
     })
@@ -134,8 +139,8 @@ function StepTimelinePlanning({
     if (!pending) return
     const keptWeeklyFocus = weeklyFocus.filter((item) => pending.weekOptions.includes(item.weekStartDate))
     onRangeCommit({
-      startMonth: pending.startMonth,
-      endMonth: pending.endMonth,
+      startDate: pending.startDate,
+      endDate: pending.endDate,
       monthlyRows: buildMonthlyTargetRows(pending.months, monthlyRows),
       weeklyFocus: keptWeeklyFocus,
     })
@@ -157,21 +162,24 @@ function StepTimelinePlanning({
     <div className="space-y-5">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor="project-start-month">Start Month *</Label>
-          <Input
-            id="project-start-month"
-            type="month"
-            value={startMonth}
-            onChange={(event) => tryApplyRange(event.target.value, endMonth)}
+          <Label htmlFor="project-start-date">Start Date *</Label>
+          <DatePicker
+            id="project-start-date"
+            value={startDate}
+            onChange={(next) => tryApplyRange(next, endDate)}
+            placeholder="Select start date"
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="project-end-month">End Month *</Label>
-          <Input
-            id="project-end-month"
-            type="month"
-            value={endMonth}
-            onChange={(event) => tryApplyRange(startMonth, event.target.value)}
+          <Label htmlFor="project-end-date">End Date *</Label>
+          <DatePicker
+            id="project-end-date"
+            value={endDate}
+            onChange={(next) => tryApplyRange(startDate, next)}
+            placeholder="Select end date"
+            // Days before the start are unpickable rather than picked and then
+            // rejected; rangeError below still covers a start moved past the end.
+            min={startDate || undefined}
           />
         </div>
       </div>
@@ -207,7 +215,7 @@ function StepTimelinePlanning({
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-medium text-foreground">
-              {monthlyRows.length} month{monthlyRows.length === 1 ? "" : "s"} · {formatMonthLabel(startMonth)} – {formatMonthLabel(endMonth)}
+              {monthlyRows.length} month{monthlyRows.length === 1 ? "" : "s"} · {formatDateLabel(startDate)} – {formatDateLabel(endDate)}
             </p>
             <div className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5">
               <Button

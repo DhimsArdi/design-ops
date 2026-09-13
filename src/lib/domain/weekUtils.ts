@@ -4,8 +4,12 @@
 //
 // A "week" is always identified by its Monday, as a "YYYY-MM-DD" string —
 // the same representation ProjectWeeklyFocus.week_start_date uses. No date
-// library: this project's architecture deliberately avoids one (see
-// docs/PRD.MD §35), and week arithmetic is simple enough to do directly.
+// library: domain code stays string-first (see docs/PRD.MD §35), and week
+// arithmetic is simple enough to do directly. date-fns entered the tree with
+// the vendored Timeline Gantt and stays confined to it (docs/DECISIONS.md).
+//
+// Internally UTC-anchored, and it never hands a Date out — so it cannot
+// collide with dateUtils.ts, which is local-midnight by design.
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -39,7 +43,17 @@ export function addWeeks(weekStart: string, delta: number): string {
 
 /** The Monday ("YYYY-MM-DD") that starts today's week. */
 export function currentWeekStart(): string {
-  return toISODate(mondayOf(new Date()));
+  // Read today's calendar date in the LOCAL zone, then re-anchor it to UTC so
+  // mondayOf's getUTCDay() reads the weekday the user actually sees. Passing a
+  // bare `new Date()` mixes the two: east of Greenwich, Monday 00:30 local is
+  // still Sunday in UTC, which returned the *previous* week's Monday.
+  const now = new Date();
+  return toISODate(mondayOf(new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))));
+}
+
+/** The Monday ("YYYY-MM-DD") of the week containing `date` ("YYYY-MM-DD"). */
+export function weekStartOf(date: string): string {
+  return toISODate(mondayOf(parseISODate(date)));
 }
 
 /** Inclusive list of Monday "YYYY-MM-DD" week-starts from range.start to range.end. */

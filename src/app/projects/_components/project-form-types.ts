@@ -24,6 +24,7 @@ import type {
 } from "@/lib/domain/types"
 import { activeOrSelected, byName } from "@/lib/domain/optionHelpers"
 import { mondaysInMonthRange } from "@/lib/domain/weekUtils"
+import { monthOf } from "@/lib/domain/dateUtils"
 
 interface ProjectContextFormState {
   name: string
@@ -68,8 +69,10 @@ interface WeeklyFocusItemState {
 
 interface ProjectFormState {
   context: ProjectContextFormState
-  startMonth: string
-  endMonth: string
+  // Day-level, inclusive (PRD §8.2). The month rows below are derived from
+  // these with monthOf(), never stored alongside them.
+  startDate: string
+  endDate: string
   monthlyTargets: MonthlyTargetRowState[]
   weeklyFocus: WeeklyFocusItemState[]
   team: DesignTeamFormState
@@ -90,8 +93,8 @@ function emptyProjectFormState(): ProjectFormState {
       ownerSquadId: "",
       description: "",
     },
-    startMonth: "",
-    endMonth: "",
+    startDate: "",
+    endDate: "",
     monthlyTargets: [],
     weeklyFocus: [],
     team: {
@@ -111,7 +114,7 @@ function buildFormStateFromProject(
 ): ProjectFormState {
   const lead = assignments.find((assignment) => assignment.project_role === "Lead")
   const support = assignments.filter((assignment) => assignment.project_role === "Support")
-  const months = monthsInRange(project.start_month, project.end_month)
+  const months = monthsInRange(monthOf(project.start_date), monthOf(project.end_date))
   const savedRows: MonthlyTargetRowState[] = monthlyTargets.map((target) => ({
     month: target.month,
     phase: target.phase,
@@ -132,8 +135,8 @@ function buildFormStateFromProject(
       ownerSquadId: project.owner_squad_id,
       description: project.description,
     },
-    startMonth: project.start_month,
-    endMonth: project.end_month,
+    startDate: project.start_date,
+    endDate: project.end_date,
     monthlyTargets: buildMonthlyTargetRows(months, savedRows),
     weeklyFocus: [...weeklyFocus]
       .sort((a, b) => a.week_start_date.localeCompare(b.week_start_date))
@@ -187,6 +190,18 @@ function formatMonthLabel(month: string): string {
   if (index === null) return month
   const date = new Date(Date.UTC(Math.floor(index / 12), index % 12, 1))
   return date.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })
+}
+
+/** "2026-09-07" -> "Sep 7, 2026". Falls back to the raw string if malformed. */
+function formatDateLabel(date: string): string {
+  const [year, month, day] = date.split("-").map(Number)
+  if (!year || !month || !day) return date
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })
 }
 
 /** True when a row has anything worth warning about before it's dropped by
@@ -262,6 +277,7 @@ export {
   buildMonthlyTargetRows,
   byName,
   emptyProjectFormState,
+  formatDateLabel,
   formatMonthLabel,
   monthlyTargetRowHasData,
   monthsInRange,

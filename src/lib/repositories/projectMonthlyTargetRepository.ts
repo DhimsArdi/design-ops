@@ -2,13 +2,9 @@
 // text `target` field (docs/PRD.MD §8.8).
 
 import { createRemovableRepository } from "./createRepository";
-import { seedProjectMonthlyTargets } from "@/lib/seed/seedData";
 import type { ProjectMonthlyTarget } from "@/lib/domain/types";
 
-const repo = createRemovableRepository<ProjectMonthlyTarget>(
-  "projectMonthlyTargets",
-  seedProjectMonthlyTargets,
-);
+const repo = createRemovableRepository<ProjectMonthlyTarget>("project_monthly_targets");
 
 export const { getAll, getById, create, update } = repo;
 

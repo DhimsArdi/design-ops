@@ -8,6 +8,7 @@ import * as projectAssignmentRepository from "@/lib/repositories/projectAssignme
 import * as projectRepository from "@/lib/repositories/projectRepository";
 import * as projectWeeklyFocusRepository from "@/lib/repositories/projectWeeklyFocusRepository";
 import type { Designer, Project, ProjectAssignment, ProjectWeeklyFocus } from "@/lib/domain/types";
+import type { ProjectStatus } from "@/lib/domain/enums";
 
 /** All ProjectAssignment rows (Lead + Support) for one project. */
 export function getProjectAssignments(projectId: string): ProjectAssignment[] {
@@ -50,7 +51,7 @@ export function isCrossSquadAssignment(
 
 /**
  * "Active Projects" (docs/DECISIONS.md, docs/PRD.MD §14.1): Status ∈
- * {Planning, In Progress} only — Proposed/On Hold/Done are excluded.
+ * {Planning, In Progress} only — On Hold/Completed/Cancelled are excluded.
  *
  * `is_archived` is an independent flag and is intentionally NOT filtered
  * here; a screen that also needs to hide archived projects composes that
@@ -64,9 +65,14 @@ export function getActiveProjects(): Project[] {
     );
 }
 
-/** "Upcoming / Proposed" (docs/PRD.MD §14.1): Status === Proposed, reported separately from Active. */
-export function getProposedProjects(): Project[] {
-  return projectRepository.getAll().filter((project) => project.status === "Proposed");
+/**
+ * A Completed or Cancelled project no longer needs day-to-day tracking —
+ * the shared definition of "terminal" (docs/PRD.MD §10, §25), replacing what
+ * used to be scattered `status !== "Done"` checks across Overview, Timeline,
+ * and the Projects list.
+ */
+export function isTerminalStatus(status: ProjectStatus): boolean {
+  return status === "Completed" || status === "Cancelled";
 }
 
 /**
@@ -78,6 +84,14 @@ export function getUnassignedProjects(): Project[] {
     .getAll()
     .filter((project) => getProjectLead(project.id) === undefined);
 }
+
+/**
+ * Sentinel value for "Design Lead" filter UIs (Projects page) and drill-down
+ * links (Overview's "Unassigned Projects" stat) — a Project's Design Lead is
+ * derived from ProjectAssignment (§8.7), not a designer id, so filtering by
+ * "no Lead assigned" needs a value distinct from any real designer's UUID.
+ */
+export const UNASSIGNED_DESIGN_LEAD = "unassigned";
 
 /**
  * All Project Weekly Focus rows for one project (docs/PRD.MD §8.9), sorted

@@ -12,6 +12,9 @@
 // measuring the DOM.
 
 import type { KeyboardEvent, ReactNode } from "react"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { healthSolidClassName, projectHealthBarClassName } from "@/components/shared/health-badge"
+import type { ProjectHealth } from "@/lib/domain/enums"
 import { cn } from "@/lib/utils"
 
 export type MonthRangeTrackConfidence = "Committed" | "Tentative"
@@ -33,6 +36,8 @@ export interface MonthRangeTrackRow {
   /** "YYYY-MM", inclusive. */
   endMonth: string
   confidence: MonthRangeTrackConfidence
+  /** Secondary visual signal on the bar's color (PRD §3 UI ask: "bar style -> commitment, color -> health"). Omit where health isn't relevant (e.g. Person Timeline) for a neutral bar. */
+  health?: ProjectHealth
   /** Phase labels overlaid under the bar. Omit (or pass []) for a plain bar with no labels. */
   segments?: MonthRangeTrackSegment[]
   onClick?: () => void
@@ -144,6 +149,12 @@ export function MonthRangeTrack({ rows, monthRange, className }: MonthRangeTrack
   )
 }
 
+/** "YYYY-MM" -> "Sep 2026", for the bar's hover tooltip. */
+function formatMonthLabel(month: string): string {
+  const { year, monthIndex } = parseMonth(month)
+  return `${MONTH_LABELS[monthIndex]} ${year}`
+}
+
 function TrackRow({
   row,
   months,
@@ -155,7 +166,6 @@ function TrackRow({
 }) {
   const startCol = gridColumnOf(row.startMonth, months)
   const endCol = gridColumnOf(row.endMonth, months)
-  const isCommitted = row.confidence === "Committed"
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!row.onClick) return
@@ -164,6 +174,23 @@ function TrackRow({
       row.onClick()
     }
   }
+
+  const bar = (
+    <div
+      role={row.onClick ? "button" : undefined}
+      tabIndex={row.onClick ? 0 : undefined}
+      onClick={row.onClick}
+      onKeyDown={handleKeyDown}
+      aria-label={`${row.label}, ${row.confidence}${row.health ? `, ${row.health}` : ""}`}
+      className={cn(
+        "my-auto flex h-3 items-center self-center rounded-full border-2",
+        projectHealthBarClassName(row.health, row.confidence),
+        row.onClick &&
+          "cursor-pointer hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+      )}
+      style={{ gridColumn: `${startCol} / ${endCol + 1}`, gridRow: 1 }}
+    />
+  )
 
   return (
     <div
@@ -174,23 +201,29 @@ function TrackRow({
         height: MONTH_RANGE_TRACK_ROW_HEIGHT_PX,
       }}
     >
-      <div
-        role={row.onClick ? "button" : undefined}
-        tabIndex={row.onClick ? 0 : undefined}
-        onClick={row.onClick}
-        onKeyDown={handleKeyDown}
-        title={`${row.label} (${row.confidence})`}
-        aria-label={`${row.label}, ${row.confidence}`}
-        className={cn(
-          "my-auto flex h-2.5 items-center self-center rounded-full border",
-          isCommitted
-            ? "border-foreground/60 bg-foreground/[0.08]"
-            : "border-dashed border-muted-foreground/60 bg-transparent opacity-70",
-          row.onClick &&
-            "cursor-pointer hover:border-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
-        )}
-        style={{ gridColumn: `${startCol} / ${endCol + 1}`, gridRow: 1 }}
-      />
+      <Tooltip>
+        <TooltipTrigger render={bar} />
+        <TooltipContent side="top" className="max-w-xs">
+          <div className="flex flex-col gap-1 py-0.5">
+            <span className="font-semibold">{row.label}</span>
+            <span>
+              {formatMonthLabel(row.startMonth)} – {formatMonthLabel(row.endMonth)}
+            </span>
+            <span className="flex items-center gap-1.5">
+              {row.confidence}
+              {row.health ? (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", healthSolidClassName(row.health))} />
+                    {row.health}
+                  </span>
+                </>
+              ) : null}
+            </span>
+          </div>
+        </TooltipContent>
+      </Tooltip>
 
       {row.segments && row.segments.length > 0 ? (
         <>

@@ -10,9 +10,9 @@
 // the Person Timeline shows bars for a human to read, the system never
 // judges them (PRD §14.6).
 //
-// Same one-time-bootstrap-read pattern as project-detail-view.tsx: data
-// starts as `undefined` ("loading") and is filled in a mount effect, so the
-// server render and first client paint (no localStorage yet) match.
+// Same pattern as project-detail-view.tsx: data starts as `undefined`
+// ("loading") and is filled in a mount effect that then stays subscribed to
+// the store, so the server render and first client paint match.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
@@ -41,6 +41,7 @@ import {
   type MonthRangeTrackRow,
 } from "@/components/timeline/month-range-track"
 
+import { subscribe } from "@/lib/store/dataStore"
 import * as designerRepository from "@/lib/repositories/designerRepository"
 import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as projectRepository from "@/lib/repositories/projectRepository"
@@ -48,6 +49,9 @@ import * as projectAssignmentRepository from "@/lib/repositories/projectAssignme
 import { getSquadLead } from "@/lib/selectors/squadSelectors"
 import { isCrossSquadAssignment } from "@/lib/selectors/projectSelectors"
 import type { Designer, Project, ProjectAssignment, Squad } from "@/lib/domain/types"
+// Person Timeline stays month-granularity (PRD §14.6) even though Project now
+// carries day-level dates — the months are derived here, not stored.
+import { monthOf } from "@/lib/domain/dateUtils"
 
 interface CurrentProjectRow {
   assignment: ProjectAssignment
@@ -82,7 +86,7 @@ function loadPersonDetail(designerId: string): PersonDetailData | null {
       }
     })
     .filter((row): row is CurrentProjectRow => row !== null)
-    .sort((a, b) => a.project.start_month.localeCompare(b.project.start_month))
+    .sort((a, b) => a.project.start_date.localeCompare(b.project.start_date))
 
   return {
     designer,
@@ -114,11 +118,13 @@ function computeMonthRange(rows: CurrentProjectRow[]): { start: string; end: str
     return { start: addMonths(current, -2), end: addMonths(current, 3) }
   }
 
-  let start = rows[0]!.project.start_month
-  let end = rows[0]!.project.end_month
+  let start = monthOf(rows[0]!.project.start_date)
+  let end = monthOf(rows[0]!.project.end_date)
   for (const row of rows) {
-    if (row.project.start_month < start) start = row.project.start_month
-    if (row.project.end_month > end) end = row.project.end_month
+    const rowStart = monthOf(row.project.start_date)
+    const rowEnd = monthOf(row.project.end_date)
+    if (rowStart < start) start = rowStart
+    if (rowEnd > end) end = rowEnd
   }
 
   const span = monthsBetween(start, end) + 1
@@ -143,10 +149,12 @@ export function PersonDetailView({ designerId }: PersonDetailViewProps) {
   }, [designerId])
 
   useEffect(() => {
-    // One-time bootstrap read of a synchronous, browser-only data source
-    // (localStorage via the repository layer), not a subscription.
+    // Subscribes to the store rather than to one repository's list, because
+    // this view joins designer, squad, assignment and project data. Re-reads on
+    // every change, including edits made by other people (docs/DECISIONS.md).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
+    return subscribe(load)
   }, [load])
 
   const rows: MonthRangeTrackRow[] = useMemo(() => {
@@ -154,8 +162,8 @@ export function PersonDetailView({ designerId }: PersonDetailViewProps) {
     return data.currentProjects.map((row) => ({
       id: row.project.id,
       label: row.project.name,
-      startMonth: row.project.start_month,
-      endMonth: row.project.end_month,
+      startMonth: monthOf(row.project.start_date),
+      endMonth: monthOf(row.project.end_date),
       confidence: row.project.timeline_confidence,
       meta: `${row.assignment.project_role}${row.crossSquad ? " · Cross-squad" : ""}`,
       onClick: () => router.push(`/projects/${row.project.id}`),

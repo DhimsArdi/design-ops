@@ -1,16 +1,19 @@
 "use client"
 
 // Epics master data (PRD §18/§8.5): the initiative-level context a project
-// belongs to, scoped to exactly one Department. Never hard-deleted — the
-// only lifecycle action is Active/Inactive via epicRepository.setStatus.
+// belongs to, scoped to exactly one Department. Active/Inactive is the
+// reversible lifecycle action; Delete is guarded by getEpicUsage so an epic
+// still referenced by a project can't be deleted (docs/DECISIONS.md).
 
 import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { toast } from "sonner"
 import { Layers, MoreHorizontal, Plus, SearchX } from "lucide-react"
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
 import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
-import { SearchInput } from "@/components/shared/search-input"
+import { FilterBar } from "@/components/shared/filter-bar"
+import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -34,6 +37,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -44,9 +48,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
+import { subscribe } from "@/lib/store/dataStore"
 import * as epicRepository from "@/lib/repositories/epicRepository"
 import * as departmentRepository from "@/lib/repositories/departmentRepository"
 import { activeOrSelected } from "@/lib/domain/optionHelpers"
+import { getEpicUsage } from "@/lib/selectors/epicSelectors"
 import type { Department, Epic } from "@/lib/domain/types"
 
 interface EpicFormState {
@@ -66,18 +73,24 @@ export default function EpicsPage() {
   const [epics, setEpics] = useState<Epic[] | null>(null)
   const [departments, setDepartments] = useState<Department[]>([])
   const [search, setSearch] = useState("")
+  const debouncedSearch = useDebouncedValue(search, 250)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingEpic, setEditingEpic] = useState<Epic | null>(null)
   const [form, setForm] = useState<EpicFormState>(EMPTY_FORM)
   const [errors, setErrors] = useState<EpicFormErrors>({})
+  const [deletingEpic, setDeletingEpic] = useState<Epic | null>(null)
 
   useEffect(() => {
-    // One-time bootstrap read of a synchronous, browser-only data source
-    // (localStorage via the repository layer), not a subscription.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDepartments(departmentRepository.getAll())
-    setEpics(epicRepository.getAll())
+    function read() {
+      setDepartments(departmentRepository.getAll())
+      setEpics(epicRepository.getAll())
+    }
+    // Reads both tables now and again on every change to the shared cache, so
+    // this page follows edits made elsewhere (docs/DECISIONS.md). Subscribes to
+    // the store rather than to one repository's list because it needs two.
+    read()
+    return subscribe(read)
   }, [])
 
   function reloadEpics() {
@@ -96,7 +109,7 @@ export default function EpicsPage() {
 
   const filteredEpics = useMemo(() => {
     if (!epics) return []
-    const query = search.trim().toLowerCase()
+    const query = debouncedSearch.trim().toLowerCase()
     if (!query) return epics
     return epics.filter((epic) => {
       const departmentName = departmentById.get(epic.department_id)?.name ?? ""
@@ -105,7 +118,7 @@ export default function EpicsPage() {
         departmentName.toLowerCase().includes(query)
       )
     })
-  }, [epics, search, departmentById])
+  }, [epics, debouncedSearch, departmentById])
 
   function openCreateDialog() {
     setEditingEpic(null)
@@ -127,6 +140,13 @@ export default function EpicsPage() {
 
   function toggleStatus(epic: Epic) {
     epicRepository.setStatus(epic.id, epic.status === "Active" ? "Inactive" : "Active")
+    reloadEpics()
+  }
+
+  function handleDeleteConfirm() {
+    if (!deletingEpic) return
+    epicRepository.remove(deletingEpic.id)
+    toast.success(`${deletingEpic.name} deleted`)
     reloadEpics()
   }
 
@@ -157,6 +177,7 @@ export default function EpicsPage() {
       })
     }
 
+    toast.success(`${name} ${editingEpic ? "updated" : "added"}`)
     setDialogOpen(false)
     reloadEpics()
   }
@@ -178,7 +199,6 @@ export default function EpicsPage() {
       />
 
       <ContentSection
-        title={hasEpics ? `${filteredEpics.length} of ${epics?.length ?? 0} epics` : undefined}
         bodyClassName="space-y-4"
       >
         {epics === null ? (
@@ -197,23 +217,19 @@ export default function EpicsPage() {
           />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <SearchInput
-                value={search}
-                onChange={setSearch}
-                placeholder="Search epics or departments…"
-                className="w-full sm:w-64"
-              />
-            </div>
+            <FilterBar
+              search={{ value: search, onChange: setSearch, placeholder: "Search epics or departments…" }}
+              hasFiltersApplied={search.trim() !== ""}
+              onClear={() => setSearch("")}
+            />
 
             {!hasResults ? (
               <EmptyState
                 icon={SearchX}
-                title="No epics match your search"
-                description={`Nothing matches "${search}". Try a different name or department.`}
+                title="No epics match these filters"
                 action={
                   <Button variant="outline" onClick={() => setSearch("")}>
-                    Clear search
+                    Clear filters
                   </Button>
                 }
               />
@@ -253,6 +269,10 @@ export default function EpicsPage() {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => toggleStatus(epic)}>
                               {epic.status === "Active" ? "Deactivate" : "Activate"}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem variant="destructive" onClick={() => setDeletingEpic(epic)}>
+                              Delete
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -314,7 +334,11 @@ export default function EpicsPage() {
                   aria-invalid={Boolean(errors.department_id)}
                   aria-describedby={errors.department_id ? "epic-department-error" : undefined}
                 >
-                  <SelectValue placeholder="Select a department" />
+                  <SelectValue placeholder="Select a department">
+                    {(departmentId: string) =>
+                      departmentOptions.find((d) => d.id === departmentId)?.name ?? ""
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {departmentOptions.map((department) => (
@@ -354,6 +378,19 @@ export default function EpicsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {deletingEpic ? (
+        <DeleteEntityDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setDeletingEpic(null)
+          }}
+          entityLabel="epic"
+          entityName={deletingEpic.name}
+          blockers={[{ label: "project", count: getEpicUsage(deletingEpic.id).projectCount }]}
+          onConfirm={handleDeleteConfirm}
+        />
+      ) : null}
     </div>
   )
 }

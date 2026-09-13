@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { MultiSelectChecklist } from "./multi-select-checklist"
+import { MultiSelectChecklist } from "@/components/shared/multi-select-checklist"
 import { activeOrSelected, byName } from "./project-form-types"
 import type { ProjectContextFormState } from "./project-form-types"
 import {
@@ -97,7 +97,9 @@ function StepProjectContext({
           <Label htmlFor="project-epic">Epic *</Label>
           <Select value={value.epicId} onValueChange={(epicId) => handleEpicChange(epicId ?? "")}>
             <SelectTrigger id="project-epic" className="w-full">
-              <SelectValue placeholder="Select an epic" />
+              <SelectValue placeholder="Select an epic">
+                {(epicId: string) => epicOptions.find((e) => e.id === epicId)?.name ?? ""}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {epicOptions.map((epic) => (
@@ -117,7 +119,11 @@ function StepProjectContext({
             onValueChange={(departmentId) => onChange({ departmentId: departmentId ?? "" })}
           >
             <SelectTrigger id="project-department" className="w-full">
-              <SelectValue placeholder="Select a department" />
+              <SelectValue placeholder="Select a department">
+                {(departmentId: string) =>
+                  departmentOptions.find((d) => d.id === departmentId)?.name ?? ""
+                }
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {departmentOptions.map((department) => (
@@ -248,7 +254,9 @@ function StepProjectContext({
           onValueChange={(ownerSquadId) => onChange({ ownerSquadId: ownerSquadId ?? "" })}
         >
           <SelectTrigger id="project-owner-squad" className="w-full">
-            <SelectValue placeholder="Select the owning squad" />
+            <SelectValue placeholder="Select the owning squad">
+              {(squadId: string) => squadOptions.find((s) => s.id === squadId)?.name ?? ""}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {squadOptions.map((squad) => (

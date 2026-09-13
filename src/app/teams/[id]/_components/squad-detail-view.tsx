@@ -8,9 +8,9 @@
 // Reads go straight through the repository/selector layer rather than the
 // useRepositoryList hook: this page needs one record by id plus several
 // derived lookups, not a reactive list. To avoid an SSR/client hydration
-// mismatch (server and first client paint have no localStorage), data starts
-// as `undefined` ("loading") and is filled in a mount effect — the same
-// one-time-bootstrap-read pattern used by app/projects/[id]/_components/
+// mismatch (the cache is browser-only), data starts as `undefined`
+// ("loading") and is filled in a mount effect that then stays subscribed to
+// the store — the same pattern used by app/projects/[id]/_components/
 // project-detail-view.tsx.
 
 import { useCallback, useEffect, useState } from "react"
@@ -24,9 +24,12 @@ import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
 import { PriorityBadge } from "@/components/shared/priority-badge"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { PersonAvatar } from "@/components/shared/person-avatar"
+import { EmptyFieldAction } from "@/components/shared/empty-field-action"
+import { SupportingProjects } from "@/components/shared/supporting-projects"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
+import { subscribe } from "@/lib/store/dataStore"
 import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as designerRepository from "@/lib/repositories/designerRepository"
 import * as projectRepository from "@/lib/repositories/projectRepository"
@@ -36,14 +39,15 @@ import type { Designer, Project, Squad } from "@/lib/domain/types"
 
 interface OutgoingSupportRow {
   designer: Designer
-  project: Project
-  ownerSquad: Squad | undefined
+  /** Every project (owned by another squad) this member currently supports. */
+  projects: Project[]
 }
 
 interface IncomingSupportRow {
   designer: Designer
   homeSquad: Squad | undefined
-  project: Project
+  /** Every one of this squad's own projects that designer currently supports. */
+  projects: Project[]
 }
 
 interface SquadDetailData {
@@ -72,33 +76,49 @@ function loadSquadDetail(squadId: string): SquadDetailData | null {
   const assignments = projectAssignmentRepository.getAll()
 
   // Outgoing: this squad's own members, assigned to a project owned by
-  // another squad.
-  const outgoing: OutgoingSupportRow[] = []
+  // another squad — grouped per designer (one row per person, not per
+  // project) so someone supporting several projects reads as one line.
+  const outgoingProjectsByMemberId = new Map<string, Project[]>()
   for (const member of members) {
     for (const assignment of assignments) {
       if (assignment.designer_id !== member.id) continue
       const project = activeProjectsById.get(assignment.project_id)
       if (!project || project.owner_squad_id === squadId) continue
-      outgoing.push({ designer: member, project, ownerSquad: squadsById.get(project.owner_squad_id) })
+      const list = outgoingProjectsByMemberId.get(member.id) ?? []
+      list.push(project)
+      outgoingProjectsByMemberId.set(member.id, list)
     }
   }
-  outgoing.sort(
-    (a, b) => a.designer.name.localeCompare(b.designer.name) || a.project.name.localeCompare(b.project.name)
-  )
+  const outgoing: OutgoingSupportRow[] = [...outgoingProjectsByMemberId.entries()]
+    .map(([memberId, projects]) => ({
+      designer: members.find((member) => member.id === memberId)!,
+      projects: [...projects].sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => a.designer.name.localeCompare(b.designer.name))
 
-  // Incoming: designers from other squads, assigned to a project this squad owns.
-  const incoming: IncomingSupportRow[] = []
+  // Incoming: designers from other squads, assigned to a project this squad
+  // owns — same per-designer grouping.
+  const incomingProjectsByDesignerId = new Map<string, Project[]>()
   for (const project of projectsOwned) {
     for (const assignment of assignments) {
       if (assignment.project_id !== project.id) continue
       const designer = designerRepository.getById(assignment.designer_id)
       if (!designer || designer.home_squad_id === squadId) continue
-      incoming.push({ designer, homeSquad: squadsById.get(designer.home_squad_id), project })
+      const list = incomingProjectsByDesignerId.get(designer.id) ?? []
+      list.push(project)
+      incomingProjectsByDesignerId.set(designer.id, list)
     }
   }
-  incoming.sort(
-    (a, b) => a.designer.name.localeCompare(b.designer.name) || a.project.name.localeCompare(b.project.name)
-  )
+  const incoming: IncomingSupportRow[] = [...incomingProjectsByDesignerId.entries()]
+    .map(([designerId, projects]) => {
+      const designer = designerRepository.getById(designerId)!
+      return {
+        designer,
+        homeSquad: squadsById.get(designer.home_squad_id),
+        projects: [...projects].sort((a, b) => a.name.localeCompare(b.name)),
+      }
+    })
+    .sort((a, b) => a.designer.name.localeCompare(b.designer.name))
 
   return {
     squad,
@@ -122,10 +142,12 @@ export function SquadDetailView({ squadId }: SquadDetailViewProps) {
   }, [squadId])
 
   useEffect(() => {
-    // One-time bootstrap read of a synchronous, browser-only data source
-    // (localStorage via the repository layer), not a subscription.
+    // Subscribes to the store rather than to one repository's list, because
+    // this view joins squad, designer, assignment and project data. Re-reads on
+    // every change, including edits made by other people (docs/DECISIONS.md).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
+    return subscribe(load)
   }, [load])
 
   if (data === undefined) {
@@ -171,9 +193,15 @@ export function SquadDetailView({ squadId }: SquadDetailViewProps) {
 
       <div className="-mt-3 flex flex-wrap items-center gap-3">
         <EntityStatusBadge status={squad.status} />
-        <span className="text-sm text-muted-foreground">
-          Squad Lead: {squadLead ? squadLead.name : "Unassigned"}
-        </span>
+        {squadLead ? (
+          <span className="text-sm text-muted-foreground">Squad Lead: {squadLead.name}</span>
+        ) : (
+          <EmptyFieldAction
+            label="No lead assigned"
+            actionLabel="Assign in Master Data"
+            href="/master-data/squads"
+          />
+        )}
       </div>
 
       <ContentSection
@@ -184,7 +212,13 @@ export function SquadDetailView({ squadId }: SquadDetailViewProps) {
           <EmptyState
             icon={Users}
             title="No designers in this squad"
-            description="A designer joins this squad by setting it as their Home Squad in Master Data."
+            description="This may be intentional — a future team or available capacity. A designer joins by setting this as their Home Squad in Master Data."
+            action={
+              <Button variant="outline" render={<Link href="/master-data/designers" />} nativeButton={false}>
+                <ExternalLink />
+                Go to Master Data
+              </Button>
+            }
           />
         ) : (
           <ul className="divide-y divide-border">
@@ -238,16 +272,10 @@ export function SquadDetailView({ squadId }: SquadDetailViewProps) {
               <p className="text-sm text-muted-foreground">No outgoing cross-squad support.</p>
             ) : (
               <ul className="space-y-3">
-                {outgoing.map((row, index) => (
-                  <li key={`${row.designer.id}-${row.project.id}-${index}`} className="text-sm">
+                {outgoing.map((row) => (
+                  <li key={row.designer.id} className="text-sm">
                     <p className="font-medium text-foreground">{row.designer.name}</p>
-                    <p className="text-muted-foreground">
-                      →{" "}
-                      <Link href={`/projects/${row.project.id}`} className="hover:underline">
-                        {row.project.name}
-                      </Link>{" "}
-                      / {row.ownerSquad?.name ?? "–"}
-                    </p>
+                    <SupportingProjects projects={row.projects} />
                   </li>
                 ))}
               </ul>
@@ -262,20 +290,15 @@ export function SquadDetailView({ squadId }: SquadDetailViewProps) {
               <p className="text-sm text-muted-foreground">No incoming cross-squad support.</p>
             ) : (
               <ul className="space-y-3">
-                {incoming.map((row, index) => (
-                  <li key={`${row.designer.id}-${row.project.id}-${index}`} className="text-sm">
+                {incoming.map((row) => (
+                  <li key={row.designer.id} className="text-sm">
                     <p className="font-medium text-foreground">
                       {row.designer.name}{" "}
                       <Badge variant="outline" className="ml-1 text-xs font-normal">
                         {row.homeSquad?.name ?? "–"}
                       </Badge>
                     </p>
-                    <p className="text-muted-foreground">
-                      →{" "}
-                      <Link href={`/projects/${row.project.id}`} className="hover:underline">
-                        {row.project.name}
-                      </Link>
-                    </p>
+                    <SupportingProjects projects={row.projects} />
                   </li>
                 ))}
               </ul>

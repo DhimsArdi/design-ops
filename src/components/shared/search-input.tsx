@@ -1,8 +1,13 @@
-// Small controlled search box shared by every Master Data list page (and,
-// later, Projects/People search): a shadcn Input with a leading search icon
-// and a trailing clear button that only appears once there's something to
-// clear. Kept fully controlled and generic — no debouncing, filtering, or
+// Small controlled search box used inside the shared filter toolbar
+// (components/shared/filter-bar.tsx): a shadcn Input with a leading search
+// icon and a trailing clear button that only appears once there's something
+// to clear. Kept fully controlled and generic — no debouncing, filtering, or
 // entity-specific logic lives here, that stays with each page's own state.
+//
+// Height is pinned to h-8 (32px, overriding Input's own h-9 default) to
+// match the FilterSelect/FilterMultiSelect trigger buttons next to it in the
+// toolbar, which render at Button size="sm" (also 32px) — the two used to be
+// visibly different heights.
 
 import type { Ref } from "react"
 import { Search, X } from "lucide-react"
@@ -28,7 +33,7 @@ function SearchInput({ value, onChange, placeholder = "Search…", className, re
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className={cn("pl-8", value && "pr-8")}
+        className={cn("h-8 pl-8", value && "pr-8")}
       />
       {value ? (
         <Button

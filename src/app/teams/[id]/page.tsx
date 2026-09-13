@@ -1,6 +1,6 @@
 // Squad Detail (PRD §14.8). Thin server wrapper only — params are async per
 // the App Router (Next 16), the repository layer is browser-only
-// (localStorage), so all data reading and rendering lives in the client
+// (the Supabase cache), so all data reading and rendering lives in the client
 // component below (mirrors app/projects/[id]/page.tsx).
 
 import { SquadDetailView } from "./_components/squad-detail-view"

@@ -7,13 +7,15 @@
 // snapshotted onto Project". Status is Active/Inactive only, never deleted.
 
 import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { toast } from "sonner"
 import { Building2, MoreHorizontal, Plus, SearchX } from "lucide-react"
 
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
 import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
-import { SearchInput } from "@/components/shared/search-input"
+import { FilterBar } from "@/components/shared/filter-bar"
+import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -45,12 +47,16 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
+import { subscribe } from "@/lib/store/dataStore"
 import * as departmentRepository from "@/lib/repositories/departmentRepository"
 import * as stakeholderRepository from "@/lib/repositories/stakeholderRepository"
 import { activeOrSelected } from "@/lib/domain/optionHelpers"
+import { getDepartmentUsage } from "@/lib/selectors/departmentSelectors"
 import type { Department, Stakeholder } from "@/lib/domain/types"
 
 const NO_HEAD_VALUE = "__none__"
@@ -71,11 +77,13 @@ export default function DepartmentsPage() {
   const [departments, setDepartments] = useState<Department[] | null>(null)
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([])
   const [search, setSearch] = useState("")
+  const debouncedSearch = useDebouncedValue(search, 250)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<DepartmentFormState>(EMPTY_FORM)
   const [nameError, setNameError] = useState(false)
+  const [deletingDepartment, setDeletingDepartment] = useState<Department | null>(null)
 
   function refresh() {
     setDepartments(departmentRepository.getAll())
@@ -83,11 +91,12 @@ export default function DepartmentsPage() {
   }
 
   useEffect(() => {
-    // One-time bootstrap read of a synchronous, browser-only data source
-    // (localStorage via the repository layer), not a subscription — the
-    // external-store alternatives to this rule don't apply here.
+    // Reads both tables now and again on every change to the shared cache, so
+    // this page follows edits made elsewhere (docs/DECISIONS.md). Subscribes to
+    // the store rather than to one repository's list because it needs two.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh()
+    return subscribe(refresh)
   }, [])
 
   const stakeholderById = useMemo(() => {
@@ -112,13 +121,13 @@ export default function DepartmentsPage() {
   }, [departmentHeadStakeholders, departments, editingId])
 
   const filteredDepartments = useMemo(() => {
-    const query = search.trim().toLowerCase()
+    const query = debouncedSearch.trim().toLowerCase()
     if (!departments) return []
     if (!query) return departments
     return departments.filter((department) =>
       department.name.toLowerCase().includes(query)
     )
-  }, [departments, search])
+  }, [departments, debouncedSearch])
 
   function openCreateDialog() {
     setEditingId(null)
@@ -164,15 +173,22 @@ export default function DepartmentsPage() {
       })
     }
 
+    toast.success(`${name} ${editingId ? "updated" : "added"}`)
     setDialogOpen(false)
     refresh()
   }
 
   function toggleStatus(department: Department) {
-    departmentRepository.setStatus(
-      department.id,
-      department.status === "Active" ? "Inactive" : "Active"
-    )
+    const nextStatus = department.status === "Active" ? "Inactive" : "Active"
+    departmentRepository.setStatus(department.id, nextStatus)
+    toast.success(`${department.name} set to ${nextStatus}`)
+    refresh()
+  }
+
+  function handleDeleteConfirm() {
+    if (!deletingDepartment) return
+    departmentRepository.remove(deletingDepartment.id)
+    toast.success(`${deletingDepartment.name} deleted`)
     refresh()
   }
 
@@ -193,11 +209,6 @@ export default function DepartmentsPage() {
       />
 
       <ContentSection
-        title={
-          hasAnyDepartments
-            ? `${filteredDepartments.length} of ${departments?.length ?? 0} departments`
-            : undefined
-        }
         bodyClassName="space-y-4"
       >
         {isLoading ? (
@@ -218,23 +229,19 @@ export default function DepartmentsPage() {
           />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <SearchInput
-                value={search}
-                onChange={setSearch}
-                placeholder="Search departments…"
-                className="w-full sm:w-64"
-              />
-            </div>
+            <FilterBar
+              search={{ value: search, onChange: setSearch, placeholder: "Search departments…" }}
+              hasFiltersApplied={search.trim() !== ""}
+              onClear={() => setSearch("")}
+            />
 
             {filteredDepartments.length === 0 ? (
               <EmptyState
                 icon={SearchX}
-                title="No departments match your search"
-                description={`Nothing matches "${search}". Try a different name.`}
+                title="No departments match these filters"
                 action={
                   <Button variant="outline" onClick={() => setSearch("")}>
-                    Clear search
+                    Clear filters
                   </Button>
                 }
               />
@@ -280,6 +287,13 @@ export default function DepartmentsPage() {
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => toggleStatus(department)}>
                                 {department.status === "Active" ? "Deactivate" : "Activate"}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onClick={() => setDeletingDepartment(department)}
+                              >
+                                Delete
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -335,7 +349,13 @@ export default function DepartmentsPage() {
                 }
               >
                 <SelectTrigger id="department-head" className="w-full">
-                  <SelectValue placeholder="Unassigned" />
+                  <SelectValue placeholder="Unassigned">
+                    {(headId: string) =>
+                      headId === NO_HEAD_VALUE
+                        ? "Unassigned"
+                        : (headOptions.find((s) => s.id === headId)?.name ?? "Unassigned")
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NO_HEAD_VALUE}>Unassigned</SelectItem>
@@ -380,6 +400,25 @@ export default function DepartmentsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {deletingDepartment ? (
+        <DeleteEntityDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setDeletingDepartment(null)
+          }}
+          entityLabel="department"
+          entityName={deletingDepartment.name}
+          blockers={(() => {
+            const usage = getDepartmentUsage(deletingDepartment.id)
+            return [
+              { label: "epic", count: usage.epicCount },
+              { label: "project", count: usage.projectCount },
+            ]
+          })()}
+          onConfirm={handleDeleteConfirm}
+        />
+      ) : null}
     </div>
   )
 }

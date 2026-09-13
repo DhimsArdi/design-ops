@@ -1,9 +1,12 @@
-// Domain interfaces for the Design Portfolio Planner.
+// Domain interfaces for DesignOps.
 // Field lists match docs/PRD.MD §8 (8.1-8.8) exactly. See docs/DECISIONS.md
 // for the rationale behind the two non-obvious fields on Project.
 
 import type {
+  DesignRole,
   EntityStatus,
+  LandingPage,
+  Language,
   Priority,
   ProjectHealth,
   ProjectPhase,
@@ -11,18 +14,58 @@ import type {
   ProjectStatus,
   Seniority,
   StakeholderType,
+  SystemRole,
+  Theme,
   TimelineConfidence,
+  TimelineView,
+  WeekStartDay,
 } from "./enums";
 
-// Role-ready per PRD §6: only "admin" exists/is used in MVP (no login UI,
-// no Editor/Viewer). Kept as its own type so future roles are additive.
-export type UserRole = "admin";
-
-export interface User {
+/**
+ * One signed-in account: who they are, what they may do, and how they like the
+ * app set up (docs/PRD.MD §6.1, §14.10). `id` is the Supabase Auth user id —
+ * the profile IS the auth user, not a record pointing at one.
+ *
+ * This is the app's only account model. It does not duplicate Designer: a
+ * Designer is the *person* the planning data refers to (home squad, project
+ * assignments, squad leadership), and `designer_id` is the link between the
+ * two. Both directions are optional — not every designer has a login, and not
+ * every login is a designer (docs/DECISIONS.md).
+ *
+ * Email is deliberately absent: Supabase Auth owns it, and mirroring it here
+ * would create a second copy that can go stale (docs/DECISIONS.md).
+ */
+export interface Profile {
   id: string;
-  name: string;
-  email: string;
-  role: UserRole;
+  full_name: string;
+  // Image URL. Null until an avatar is uploaded — initials are derived from
+  // full_name for display, exactly as Designer.avatar already works (§8.1).
+  avatar_url: string | null;
+  job_title: string;
+
+  // What this person does. Null until they choose one.
+  design_role: DesignRole | null;
+  // What this account may do. Never writable by its own user — that is
+  // enforced by column privileges in supabase/schema.sql, not by the UI.
+  system_role: SystemRole;
+
+  // The Designer row this account is. Null for an account with no person
+  // record, which is a complete working account — it just doesn't appear in
+  // the people pickers (Squad Lead, Supporting Designers).
+  designer_id: string | null;
+
+  language: Language;
+  // IANA zone name.
+  timezone: string;
+  week_starts_on: WeekStartDay;
+
+  default_landing_page: LandingPage;
+  default_timeline_view: TimelineView;
+  theme: Theme;
+
+  // ISO 8601 timestamps. Both written by the database.
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Designer {
@@ -102,9 +145,17 @@ export interface Project {
   // changing its lifecycle status or deleting it (see docs/DECISIONS.md).
   is_archived: boolean;
 
-  // "YYYY-MM" month strings (inclusive range).
-  start_month: string;
-  end_month: string;
+  // Set when status becomes "Completed" (Mark as complete), cleared again on
+  // Reopen. "YYYY-MM-DD". Independent of end_date — see docs/DECISIONS.md
+  // for why there's no per-ProjectAssignment allocation-end-date field.
+  completed_at: string | null;
+
+  // "YYYY-MM-DD" day-level dates, both ends INCLUSIVE. The month span these
+  // imply (ProjectMonthlyTarget rows, Person Timeline) is derived with
+  // monthOf() from dateUtils.ts — never stored twice, so a Timeline drag can't
+  // leave a month field disagreeing with the dates (docs/DECISIONS.md).
+  start_date: string;
+  end_date: string;
 
   description: string;
 

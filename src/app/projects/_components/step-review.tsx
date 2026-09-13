@@ -5,7 +5,7 @@ import { HealthBadge } from "@/components/shared/health-badge"
 import { PriorityBadge } from "@/components/shared/priority-badge"
 import { StatusBadge } from "@/components/shared/status-badge"
 import type { Department, Designer, Epic, Squad, Stakeholder } from "@/lib/domain/types"
-import { formatMonthLabel } from "./project-form-types"
+import { formatDateLabel, formatMonthLabel } from "./project-form-types"
 import type { ProjectFormState } from "./project-form-types"
 
 interface StepReviewProps {
@@ -75,8 +75,8 @@ function StepReview({
 
       <div className="space-y-2">
         <p className="text-sm font-medium text-foreground">
-          {form.startMonth && form.endMonth
-            ? `${formatMonthLabel(form.startMonth)} – ${formatMonthLabel(form.endMonth)}`
+          {form.startDate && form.endDate
+            ? `${formatDateLabel(form.startDate)} – ${formatDateLabel(form.endDate)}`
             : "No timeline set"}
         </p>
         {targetRows.length === 0 ? (

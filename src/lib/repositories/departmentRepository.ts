@@ -1,14 +1,14 @@
-// Department repository (master data). Never hard-deleted — use setStatus
-// to mark a Department Inactive instead (docs/DECISIONS.md).
+// Department repository (master data). setStatus retires a Department
+// without deleting it; remove() hard-deletes one, guarded by a usage check
+// at the call site before it's ever invoked (docs/DECISIONS.md).
 
-import { createRepository } from "./createRepository";
-import { seedDepartments } from "@/lib/seed/seedData";
+import { createRemovableRepository } from "./createRepository";
 import type { Department } from "@/lib/domain/types";
 import type { EntityStatus } from "@/lib/domain/enums";
 
-const repo = createRepository<Department>("departments", seedDepartments);
+const repo = createRemovableRepository<Department>("departments");
 
-export const { getAll, getById, create, update } = repo;
+export const { getAll, getById, create, update, remove } = repo;
 
 /** Master data is never hard-deleted; this is the only supported way to retire a Department. */
 export function setStatus(

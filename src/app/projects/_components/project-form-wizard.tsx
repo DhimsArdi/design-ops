@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { Check } from "lucide-react"
 import { cn } from "cn"
 
@@ -46,7 +47,6 @@ import type {
 import {
   buildFormStateFromProject,
   emptyProjectFormState,
-  monthsInRange,
   toPersistableRows,
   toPersistableWeeklyFocus,
   type MonthlyTargetRowState,
@@ -91,9 +91,10 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
-    // One-time bootstrap read of synchronous, browser-only repositories
-    // (localStorage via the repository layer) — matches the pattern already
-    // used on the Squads/Stakeholders Master Data pages.
+    // One-time read on mount, deliberately not a subscription: these are the
+    // form's dropdown options, and having them change under the user
+    // mid-edit — because someone else added a department — would be worse
+    // than showing the set they started with.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLookups({
       epics: epicRepository.getAll(),
@@ -159,15 +160,15 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
   }
 
   function handleRangeCommit(next: {
-    startMonth: string
-    endMonth: string
+    startDate: string
+    endDate: string
     monthlyRows: MonthlyTargetRowState[]
     weeklyFocus: WeeklyFocusItemState[]
   }) {
     setForm((current) => ({
       ...current,
-      startMonth: next.startMonth,
-      endMonth: next.endMonth,
+      startDate: next.startDate,
+      endDate: next.endDate,
       monthlyTargets: next.monthlyRows,
       weeklyFocus: next.weeklyFocus,
     }))
@@ -219,7 +220,7 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
     form.context.ownerSquadId !== ""
 
   const step2Valid =
-    form.startMonth !== "" && form.endMonth !== "" && monthsInRange(form.startMonth, form.endMonth).length > 0
+    form.startDate !== "" && form.endDate !== "" && form.startDate <= form.endDate
 
   const canGoNext = step === 1 ? step1Valid : step === 2 ? step2Valid : true
 
@@ -233,8 +234,8 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
     if (form.context.productOwnerIds.length === 0) missingFields.push("Product Owner")
     if (form.context.ownerSquadId === "") missingFields.push("Owner Squad")
   } else if (step === 2) {
-    if (form.startMonth === "" || form.endMonth === "") missingFields.push("Start and end month")
-    else if (monthsInRange(form.startMonth, form.endMonth).length === 0) missingFields.push("A valid month range")
+    if (form.startDate === "" || form.endDate === "") missingFields.push("Start and end date")
+    else if (form.startDate > form.endDate) missingFields.push("An end date on or after the start date")
   }
 
   function goNext() {
@@ -277,8 +278,8 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
       status: form.context.status,
       health: form.context.health,
       timeline_confidence: form.context.timelineConfidence,
-      start_month: form.startMonth,
-      end_month: form.endMonth,
+      start_date: form.startDate,
+      end_date: form.endDate,
       description: form.context.description.trim(),
     }
     const finalRows = toPersistableRows(form.monthlyTargets)
@@ -288,6 +289,7 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
       const project = projectRepository.create({
         ...basePayload,
         is_archived: false,
+        completed_at: null,
         created_at: now,
         updated_at: now,
       })
@@ -318,6 +320,7 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
         })
       }
 
+      toast.success(`${basePayload.name} created`)
       router.push(`/projects/${project.id}`)
       return
     }
@@ -389,6 +392,7 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
       }
     }
 
+    toast.success(`${basePayload.name} updated`)
     router.push(`/projects/${projectId}`)
   }
 
@@ -454,8 +458,8 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
         ) : null}
         {step === 2 ? (
           <StepTimelinePlanning
-            startMonth={form.startMonth}
-            endMonth={form.endMonth}
+            startDate={form.startDate}
+            endDate={form.endDate}
             monthlyRows={form.monthlyTargets}
             weeklyFocus={form.weeklyFocus}
             onRangeCommit={handleRangeCommit}

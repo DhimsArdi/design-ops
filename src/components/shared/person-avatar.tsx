@@ -5,6 +5,7 @@
 // Generic over any person-like entity, not just Designer.
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { initialsFromName } from "@/lib/identity/person-display"
 
 type AvatarSize = "default" | "sm" | "lg"
 
@@ -16,13 +17,6 @@ interface PersonAvatarInput {
 
 function isImageSrc(avatar: string) {
   return avatar.startsWith("http") || avatar.startsWith("/") || avatar.startsWith("data:")
-}
-
-function initialsFromName(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return "?"
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase()
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase()
 }
 
 function fallbackText(person: PersonAvatarInput) {

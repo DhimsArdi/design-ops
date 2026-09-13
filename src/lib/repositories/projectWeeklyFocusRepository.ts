@@ -2,13 +2,9 @@
 // week_start_date); free-text `title`/`description` (docs/PRD.MD §8.9).
 
 import { createRemovableRepository } from "./createRepository";
-import { seedProjectWeeklyFocus } from "@/lib/seed/seedData";
 import type { ProjectWeeklyFocus } from "@/lib/domain/types";
 
-const repo = createRemovableRepository<ProjectWeeklyFocus>(
-  "projectWeeklyFocus",
-  seedProjectWeeklyFocus,
-);
+const repo = createRemovableRepository<ProjectWeeklyFocus>("project_weekly_focus");
 
 export const { getAll, getById, create, update } = repo;
 

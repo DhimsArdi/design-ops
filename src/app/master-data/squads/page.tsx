@@ -6,13 +6,16 @@
 // status) and offers a read-only view of derived membership.
 
 import { useCallback, useEffect, useState } from "react"
+import { toast } from "sonner"
 import { MoreHorizontal, Plus, SearchX, Users } from "lucide-react"
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
 import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
-import { SearchInput } from "@/components/shared/search-input"
+import { FilterBar } from "@/components/shared/filter-bar"
 import { PersonAvatar } from "@/components/shared/person-avatar"
+import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
+import { PersonSelect } from "@/components/shared/person-select"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -27,16 +30,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -47,18 +44,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useCurrentDesignerId } from "@/lib/identity/current-user"
+import { personDisplayName } from "@/lib/identity/person-display"
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
+import { subscribe } from "@/lib/store/dataStore"
 import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as designerRepository from "@/lib/repositories/designerRepository"
-import { getSquadLead, getSquadMembers } from "@/lib/selectors/squadSelectors"
+import { getSquadLead, getSquadMembers, getSquadUsage } from "@/lib/selectors/squadSelectors"
 import type { Designer, Squad } from "@/lib/domain/types"
 
 export default function SquadsPage() {
+  const currentDesignerId = useCurrentDesignerId()
   const [squads, setSquads] = useState<Squad[] | null>(null)
   const [designers, setDesigners] = useState<Designer[] | null>(null)
   const [search, setSearch] = useState("")
+  const debouncedSearch = useDebouncedValue(search, 250)
   const [formOpen, setFormOpen] = useState(false)
   const [editingSquad, setEditingSquad] = useState<Squad | null>(null)
   const [viewingSquad, setViewingSquad] = useState<Squad | null>(null)
+  const [deletingSquad, setDeletingSquad] = useState<Squad | null>(null)
 
   const refresh = useCallback(() => {
     setSquads(squadRepository.getAll())
@@ -66,10 +70,12 @@ export default function SquadsPage() {
   }, [])
 
   useEffect(() => {
-    // One-time bootstrap read of a synchronous, browser-only data source
-    // (localStorage via the repository layer), not a subscription.
+    // Reads both tables now and again on every change to the shared cache, so
+    // this page follows edits made elsewhere (docs/DECISIONS.md). Subscribes to
+    // the store rather than to one repository's list because it needs two.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh()
+    return subscribe(refresh)
   }, [refresh])
 
   function openCreateDialog() {
@@ -83,13 +89,22 @@ export default function SquadsPage() {
   }
 
   function handleToggleStatus(squad: Squad) {
-    squadRepository.setStatus(squad.id, squad.status === "Active" ? "Inactive" : "Active")
+    const nextStatus = squad.status === "Active" ? "Inactive" : "Active"
+    squadRepository.setStatus(squad.id, nextStatus)
+    toast.success(`${squad.name} set to ${nextStatus}`)
+    refresh()
+  }
+
+  function handleDeleteConfirm() {
+    if (!deletingSquad) return
+    squadRepository.remove(deletingSquad.id)
+    toast.success(`${deletingSquad.name} deleted`)
     refresh()
   }
 
   const activeDesigners = (designers ?? []).filter((designer) => designer.status === "Active")
 
-  const trimmedSearch = search.trim().toLowerCase()
+  const trimmedSearch = debouncedSearch.trim().toLowerCase()
   const filteredSquads = (squads ?? []).filter((squad) =>
     squad.name.toLowerCase().includes(trimmedSearch)
   )
@@ -108,7 +123,6 @@ export default function SquadsPage() {
       />
 
       <ContentSection
-        title={squads && squads.length > 0 ? `${filteredSquads.length} of ${squads.length} squads` : undefined}
         bodyClassName="space-y-4"
       >
         {squads === null ? (
@@ -127,23 +141,19 @@ export default function SquadsPage() {
           />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <SearchInput
-                value={search}
-                onChange={setSearch}
-                placeholder="Search squads…"
-                className="w-full sm:w-64"
-              />
-            </div>
+            <FilterBar
+              search={{ value: search, onChange: setSearch, placeholder: "Search squads…" }}
+              hasFiltersApplied={search.trim() !== ""}
+              onClear={() => setSearch("")}
+            />
 
             {filteredSquads.length === 0 ? (
               <EmptyState
                 icon={SearchX}
-                title="No squads match your search"
-                description={`Nothing matches "${search}". Try a different name.`}
+                title="No squads match these filters"
                 action={
                   <Button variant="outline" onClick={() => setSearch("")}>
-                    Clear search
+                    Clear filters
                   </Button>
                 }
               />
@@ -176,7 +186,7 @@ export default function SquadsPage() {
                           </button>
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {lead ? lead.name : "–"}
+                          {lead ? personDisplayName(lead, currentDesignerId) : "–"}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {memberCount} {memberCount === 1 ? "designer" : "designers"}
@@ -199,6 +209,10 @@ export default function SquadsPage() {
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleToggleStatus(squad)}>
                                 {squad.status === "Active" ? "Deactivate" : "Activate"}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem variant="destructive" onClick={() => setDeletingSquad(squad)}>
+                                Delete
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -227,6 +241,25 @@ export default function SquadsPage() {
           if (!open) setViewingSquad(null)
         }}
       />
+
+      {deletingSquad ? (
+        <DeleteEntityDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setDeletingSquad(null)
+          }}
+          entityLabel="squad"
+          entityName={deletingSquad.name}
+          blockers={(() => {
+            const usage = getSquadUsage(deletingSquad.id)
+            return [
+              { label: "designer", count: usage.designerCount },
+              { label: "project", count: usage.projectCount },
+            ]
+          })()}
+          onConfirm={handleDeleteConfirm}
+        />
+      ) : null}
     </div>
   )
 }
@@ -249,6 +282,8 @@ function SquadFormDialog({
   onSaved,
 }: SquadFormDialogProps) {
   const isEdit = squad !== null
+  const currentDesignerId = useCurrentDesignerId()
+  const sortedDesigners = [...activeDesigners].sort((a, b) => a.name.localeCompare(b.name))
   const [name, setName] = useState("")
   const [leadDesignerId, setLeadDesignerId] = useState<string | null>(null)
   const [description, setDescription] = useState("")
@@ -281,6 +316,7 @@ function SquadFormDialog({
         status: "Active",
       })
     }
+    toast.success(`${trimmedName} ${squad ? "updated" : "added"}`)
     onSaved()
     onOpenChange(false)
   }
@@ -311,23 +347,19 @@ function SquadFormDialog({
 
           <div className="space-y-1.5">
             <Label htmlFor="squad-lead">Squad Lead</Label>
-            <Select value={leadDesignerId} onValueChange={(value) => setLeadDesignerId(value)}>
-              <SelectTrigger id="squad-lead" className="w-full">
-                <SelectValue placeholder="Unassigned">
-                  {(value: string | null) =>
-                    value ? (activeDesigners.find((d) => d.id === value)?.name ?? "Unassigned") : "Unassigned"
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={null}>Unassigned</SelectItem>
-                {activeDesigners.map((designer) => (
-                  <SelectItem key={designer.id} value={designer.id}>
-                    {designer.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Searchable, with avatars and job titles, and the signed-in user
+                shown as "(Me)" when they have a designer record — the same
+                control the Project Design Lead field uses (PRD §14.11). The
+                signed-in user is not injected into this list: they are in it
+                because they are a designer, like everyone else. */}
+            <PersonSelect
+              id="squad-lead"
+              value={leadDesignerId}
+              onChange={setLeadDesignerId}
+              people={sortedDesigners}
+              currentDesignerId={currentDesignerId}
+              emptyOption="Unassigned"
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -360,6 +392,7 @@ interface SquadMembersDialogProps {
 /** Read-only membership view — derived live from Designer.home_squad_id.
  * There is intentionally no add/remove control here. */
 function SquadMembersDialog({ squad, onOpenChange }: SquadMembersDialogProps) {
+  const currentDesignerId = useCurrentDesignerId()
   const members = squad ? getSquadMembers(squad.id) : []
   const lead = squad ? getSquadLead(squad.id) : undefined
 
@@ -369,7 +402,7 @@ function SquadMembersDialog({ squad, onOpenChange }: SquadMembersDialogProps) {
         <DialogHeader>
           <DialogTitle>{squad?.name}</DialogTitle>
           <DialogDescription>
-            Squad Lead: {lead ? lead.name : "Unassigned"}
+            Squad Lead: {lead ? personDisplayName(lead, currentDesignerId) : "Unassigned"}
           </DialogDescription>
         </DialogHeader>
 
@@ -383,7 +416,9 @@ function SquadMembersDialog({ squad, onOpenChange }: SquadMembersDialogProps) {
               <li key={member.id} className="flex items-center gap-3 px-3 py-2">
                 <PersonAvatar person={member} size="sm" />
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{member.name}</p>
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {personDisplayName(member, currentDesignerId)}
+                  </p>
                   <p className="truncate text-xs text-muted-foreground">{member.job_title}</p>
                 </div>
               </li>

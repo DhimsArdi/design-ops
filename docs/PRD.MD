@@ -1,18 +1,18 @@
 # Product Requirements Document
 
-## Design Portfolio & Manpower Planner — MVP
+## DesignOps — MVP
 
 **Document status:** MVP Ready for Build
 **Primary user:** Design Planning Admin / Design Lead
 **Primary purpose:** Stakeholder-facing portfolio and manpower visibility
 **Platform:** Web application, desktop-first
-**MVP access model:** Admin only
+**Access model:** Sign-in required; every authenticated user has Admin rights
 
 ---
 
 # 1. Product Summary
 
-Design Portfolio & Manpower Planner adalah aplikasi internal untuk membantu tim Design memetakan:
+DesignOps adalah aplikasi internal untuk membantu tim Design memetakan:
 
 * project yang sedang dan akan berjalan,
 * timeline dan target masing-masing project,
@@ -189,7 +189,13 @@ Stakeholder hanya melihat aplikasi melalui presentasi/screen sharing, bukan logi
 
 # 6. User Access
 
-## MVP
+## Sign-in
+
+Aplikasi memerlukan login (Supabase Auth, email + password). Akun dibuat lewat undangan dari Supabase dashboard — **public sign-up harus dimatikan di sana**. Itulah daftar aksesnya: Row Level Security memberi akses penuh ke setiap user yang terautentikasi, jadi siapa yang boleh menjadi terautentikasi adalah kontrol yang sebenarnya.
+
+Stakeholder tetap tidak login — mereka melihat aplikasi lewat presentasi/screen sharing.
+
+## Role
 
 Hanya satu application role:
 
@@ -197,12 +203,16 @@ Hanya satu application role:
 Admin
 ```
 
+Setiap user yang berhasil login adalah Admin. Tidak ada perbedaan hak akses antar user.
+
 Admin dapat:
 
 * melihat seluruh data,
 * membuat project,
 * mengedit project,
-* archive project (tidak ada hard delete, lihat §25),
+* mengubah lifecycle project: Mark as complete, Put on hold, Cancel, Reopen (§10, §25),
+* archive project (§25),
+* delete project atau master data record — master data yang masih direferensikan diblokir, kecuali Designer dan Stakeholder yang punya `Delete anyway` (§25),
 * mengelola designers,
 * mengelola squads,
 * mengelola departments,
@@ -217,16 +227,6 @@ Tidak perlu:
 * permission matrix,
 * per-squad permission.
 
-Namun struktur user sebaiknya tetap role-ready:
-
-```text
-User
-- id
-- name
-- email
-- role = admin
-```
-
 Future roles:
 
 ```text
@@ -235,7 +235,75 @@ Editor
 Viewer
 ```
 
-Tidak perlu dibuat UI-nya pada MVP.
+Saat role tersebut diperlukan, tempatnya adalah policy per-command di `supabase/schema.sql`, bukan perubahan di aplikasi. Tidak perlu dibuat UI-nya sekarang.
+
+---
+
+# 6.1 Profile & Identity
+
+Setiap akun yang login punya satu **Profile**. Profile adalah akun — bukan record terpisah yang menunjuk ke akun — sehingga `Profile.id` sama dengan user id Supabase Auth.
+
+Profile menyimpan identitas akun dan preferensi personalnya (§8.10). Email **tidak** disalin ke Profile: Supabase Auth adalah satu-satunya sumber kebenaran untuk email, dan hanya dari sana email bisa diubah.
+
+## Hubungan Profile dan Designer
+
+Designer (§8.1) adalah *orang* yang ditunjuk oleh data perencanaan: home squad, project assignment, squad lead. Profile adalah *akun*. Keduanya dihubungkan oleh satu field opsional:
+
+```text
+auth.users  ──1:1──  Profile  ──0..1──  Designer
+(login)              (akun)             (orang: squad, assignment, leadership)
+```
+
+`Profile.designer_id` boleh null di kedua arah:
+
+* tidak semua Designer punya akun login (mereka dibuat di Master Data, bukan lewat undangan),
+* tidak semua akun adalah Designer (misalnya Design Ops atau manajer yang hanya membaca).
+
+Akun yang **belum** ditautkan tetap akun yang lengkap dan berfungsi — ia hanya tidak muncul di people picker (Squad Lead, Supporting Designers). Penautan dilakukan sendiri oleh user di Settings → Profile, dan satu Designer hanya boleh diklaim oleh satu akun.
+
+Saat tertaut, menyimpan Profile juga menulis `full_name` dan `job_title` ke record Designer tersebut. Sinkronisasi ini satu arah dan disengaja: record Designer adalah nama yang dibaca seluruh layar perencanaan, jadi nama di Settings dan nama di Squad tidak boleh berbeda.
+
+## Design Role vs System Role
+
+Dua sumbu berbeda, tidak boleh digabung menjadi satu field `role`:
+
+```text
+design_role   apa yang dikerjakan orang ini
+              Product Designer, UX Researcher, Design Lead, ...
+              user boleh mengubahnya sendiri
+
+system_role   apa yang boleh dilakukan akun ini
+              Admin, Member, Viewer
+              user TIDAK boleh mengubahnya sendiri
+```
+
+Di MVP setiap akun tetap Admin (§6). `system_role` sudah ada sekarang supaya Editor/Viewer nanti menjadi perubahan policy, bukan perubahan tipe data.
+
+Larangan self-promotion bukan urusan UI. Kolom `system_role` berada di luar GRANT UPDATE untuk role `authenticated` (`supabase/schema.sql`), jadi database yang menolaknya — bukan form yang menyembunyikan kontrolnya.
+
+---
+
+# 6.2 Password Recovery
+
+Selain mengganti password dari dalam aplikasi (Settings → Security), user yang **tidak bisa login** harus punya jalan keluar.
+
+Rute:
+
+```text
+/forgot-password    minta link reset
+/reset-password     tujuan link dari email
+```
+
+Keduanya harus bisa diakses tanpa session — itu seluruh alasan mereka ada — jadi keduanya render di luar gate login dan di luar AppShell. Layout visualnya sama dengan halaman Sign in; tidak ada desain auth kedua.
+
+Aturan:
+
+* Link reset dikirim lewat Supabase Auth (`resetPasswordForEmail`), tujuannya dibangun dari origin browser saat itu supaya benar di local, staging, dan production tanpa hostname yang ditulis di kode.
+* Halaman konfirmasi **tidak** memberi tahu apakah email tersebut punya akun. Membocorkannya akan menjadikan form ini alat untuk menguji siapa yang bekerja di sini.
+* Link kedaluwarsa atau tidak valid harus mendarat di state yang menjelaskan dan menawarkan `Request a new link`, bukan error mentah dari Supabase.
+* Setelah reset berhasil, session recovery ditutup dan user diarahkan kembali ke Sign in — password barunya langsung terbukti bekerja.
+* Mengganti password dari Settings → Security wajib melakukan re-autentikasi dengan password lama terlebih dulu. Tanpa itu, laptop yang sedang terbuka sudah cukup untuk mengganti password seseorang.
+* Password tidak pernah disimpan di database aplikasi, di localStorage, atau di log.
 
 ---
 
@@ -256,10 +324,21 @@ Utility navigation:
 
 ```text
 Settings
-User/Profile
+Account menu
 ```
 
-Settings dapat sangat minimal pada MVP.
+Settings dan akun tinggal di footer sidebar, terpisah dari enam destinasi kerja di atas — mereka mengatur orang yang memakai aplikasi, bukan pekerjaan yang diatur aplikasi.
+
+Settings punya sub-navigasi sendiri (§14.10):
+
+```text
+/settings           -> /settings/general
+/settings/general
+/settings/profile
+/settings/security
+```
+
+Account menu berisi `Profile` dan `Sign out`. Settings sengaja tidak diulang di dalamnya — barisnya persis di atas menu itu.
 
 ---
 
@@ -352,7 +431,7 @@ Merchant Business
 Digital Banking
 ```
 
-Department is never hard-deleted. Use `status = Inactive` if a department is retired; it remains available for historical Project rendering.
+Use `status = Inactive` if a department is retired and still referenced by historical Projects/Epics — it remains available for their rendering. Delete is only available once nothing references it (§15).
 
 ---
 
@@ -429,14 +508,20 @@ health
 timeline_confidence
 is_archived
 
-start_month
-end_month
+start_date
+end_date
 
 description
 
 created_at
 updated_at
 ```
+
+`start_date` and `end_date` are `"YYYY-MM-DD"`, both ends inclusive. The
+month span they imply — the one Monthly Targets (§8.8) are keyed to, and the
+one Person Timeline (§14.6) draws — is **derived** from them, never stored
+alongside them, so a Timeline reschedule can never leave a month field
+disagreeing with the dates.
 
 `department_head_id` is an ownership **snapshot**: copied from Department's current `department_head_id` at the time the Project is created or its Department is changed. It does not live-update if the Department's head changes later, so historical Project context stays stable.
 
@@ -514,7 +599,7 @@ Target: Developer handoff complete
 
 # 8.9 Project Weekly Focus
 
-Lightweight, operational-planning companion to Project Monthly Target (§8.8) — not a task-management entity. See §14.2 (Timeline Week View) and §22 (Add/Edit Project — Timeline & Planning) for where it is read and edited.
+Lightweight, operational-planning companion to Project Monthly Target (§8.8) — not a task-management entity. See §14.2 (Timeline) and §22 (Add/Edit Project — Timeline & Planning) for where it is read and edited.
 
 Fields:
 
@@ -544,6 +629,42 @@ Title: LC Issuance flow exploration
 ```
 
 Do not add: task status, task assignee, subtasks, checklist, story points, sprint planning, Kanban, task comments, per-task priority, per-task workload, or task completion percentage. Weekly Focus is a short planning note, not a Jira-style task.
+
+---
+
+# 8.10 Profile
+
+Satu row per akun Supabase Auth. Dibuat bersama akunnya, bukan saat pertama kali membuka Settings — halaman Settings tidak boleh punya state "profil belum ada".
+
+Fields:
+
+```text
+id                      = user id Supabase Auth
+full_name
+avatar_url (optional)
+job_title
+
+design_role (optional)  disiplin: Product Designer, UX Researcher, ...
+system_role             otorisasi: Admin | Member | Viewer  (tidak bisa diubah sendiri)
+designer_id (optional)  tautan ke Designer (§8.1), unik
+
+language                'en'
+timezone                nama zona IANA, default 'Asia/Jakarta'
+week_starts_on          'monday' | 'sunday'
+
+default_landing_page    'overview' | 'projects' | 'timeline'
+default_timeline_view   'week' | 'month' | 'quarter' | 'year'
+theme                   'light' | 'dark' | 'system'
+
+created_at
+updated_at
+```
+
+Profile **bukan** model orang kedua. Ia tidak menduplikasi Designer, Stakeholder, atau entitas master data lain — lihat §6.1 untuk hubungan dan aturan sinkronisasinya.
+
+Preferensi disimpan di sini, bukan di localStorage, supaya ikut pindah ke perangkat berikutnya dan bisa dibaca kembali oleh aplikasi.
+
+Jangan tambahkan: notification preference, connected account, API key, session list, device list, login history, billing. Semuanya di luar scope (§38).
 
 ---
 
@@ -579,16 +700,17 @@ Hindari High / Medium / Low supaya visual lebih ringkas.
 Supported statuses:
 
 ```text
-Proposed
 Planning
 In Progress
 On Hold
-Done
+Completed
+Cancelled
 ```
 
-### Proposed
-
-Project masih merupakan upcoming initiative.
+Typical lifecycle: Planning → In Progress → Completed. On Hold and Cancelled
+are the alternate branches, reachable from Planning/In Progress/On Hold.
+Completed and Cancelled are both **terminal** — reachable through Reopen back
+to In Progress, but neither advances forward on its own.
 
 ### Planning
 
@@ -600,11 +722,33 @@ Sedang berjalan.
 
 ### On Hold
 
-Sementara dihentikan.
+Sementara dihentikan. Preserves all current allocation and timeline
+information — putting a project on hold never touches its assignments,
+monthly targets, or timeline.
 
-### Done
+### Completed
 
-Selesai dan tetap tersimpan sebagai history.
+Selesai dan tetap tersimpan sebagai history. Set via "Mark as complete"
+(§25), which records a completion date and — only when the project's own
+end_date falls after that date — asks whether to keep the existing
+end_date as a historical record or shorten it to the completion date. A
+Completed project can be Reopened (back to In Progress) at any time; nothing
+is deleted or reset by either transition.
+
+### Cancelled
+
+The project will not happen (or will not continue). Like Completed, it is
+terminal and reachable via Reopen; unlike Completed, it carries no
+completion date and no allocation-timing question, since a cancelled
+project's timeline was never actually run to.
+
+Neither Completed nor Cancelled counts toward Active Projects (§14.1), the
+Projects list's default Active tab (§14.3), or the Health breakdown — see
+those sections for the exact scope each one uses.
+
+`Archived` is **not** a status — it is the independent `is_archived` flag
+described in §25. A project can be any of the five statuses above, archived
+or not, independently.
 
 ---
 
@@ -740,14 +884,13 @@ Minimal:
 
 ```text
 Active Projects
-Upcoming / Proposed
 Designers
 Unassigned Projects
 ```
 
-**Active Projects** = Status ∈ {Planning, In Progress} only. `Proposed` is counted separately under **Upcoming / Proposed**. `On Hold` and `Done` are excluded from the Active count.
+**Active Projects** = Status ∈ {Planning, In Progress} only. `On Hold`, `Completed`, and `Cancelled` are excluded from the Active count. This is a narrower scope than the Projects list's own default Active tab (§14.3), which also includes On Hold — the two "active" definitions are deliberately different: this one is the headline KPI, that one is a default list view.
 
-**Done and Archived projects are hidden from Overview by default.** They remain fully accessible via filters on the Projects page (§14.3) and are never deleted.
+**Completed, Cancelled, and Archived projects are hidden from Overview by default.** They remain fully accessible via filters on the Projects page (§14.3) and are never deleted.
 
 Optional:
 
@@ -777,10 +920,6 @@ Malik
 On Track
 ```
 
-### Upcoming Projects
-
-Show proposed/planning project yang akan segera mulai.
-
 ### Project Health
 
 Simple summary:
@@ -791,7 +930,10 @@ At Risk   3
 Blocked   1
 ```
 
-Tidak perlu pie chart besar.
+Tidak perlu pie chart besar. Scope is broader than Active Projects: every
+non-archived, non-Completed, non-Cancelled project (so On Hold projects are
+included here even though they aren't part of the Active Projects count
+above).
 
 ### Team Snapshot
 
@@ -827,17 +969,29 @@ Squad A → Digital Channel / Squad C
 
 Menjadi primary portfolio visualization.
 
-Timeline supports two view modes, switched with a segmented control in the header:
+Timeline is one Gantt chart across four time scales, always visible as a segmented control in the timeline toolbar — never folded into a dropdown, because which scale you are reading is part of reading the chart:
 
 ```text
-[Month] [Week]
+[Week] [Month] [Quarter] [Year]
 ```
 
-**Month** is the default view on load and the default after any filter change. Both views share the same visual language, the same sticky Project column, and the same filters — switching between them must not feel like entering a different screen.
+**Year** is the default on load — its columns are months, which is the portfolio view. **Quarter** has week columns grouped by month, **Month** and **Week** have day columns. Switching scale keeps the active filters. The scales share one sticky Project column, one set of filters, and one visual language: changing scale must not feel like entering a different screen.
 
-Day-level granularity is **not** supported (no zoom to individual days).
+Scales are a continuum, not separate screens. Zoom (the canvas utility dock, Ctrl/Cmd + wheel, trackpad pinch) moves within a scale; the timeline extends itself as you scroll toward either edge.
 
-### Month View
+The page is the chart. The timeline card claims the height the page can give it and holds its own toolbar; nothing else competes for the screen (§29 hierarchy: title, canvas, project names, durations, navigation, then filters).
+
+### Toolbar vs. canvas utilities
+
+The toolbar carries only the four things a Design Lead reaches for constantly while planning: **Search**, **Filter**, **navigate time**, **switch scale**. Nothing else belongs there — a toolbar of a dozen equal-weight controls has no primary action.
+
+Time navigation is one cluster, not three controls spread across the row: `Today` sits with the stepper it acts on, and the period readout is only as wide as the selected scale needs, so the arrows stay beside the period instead of at arm's length from it.
+
+**The period readout is never truncated.** It is primary information — `September 20…` is not a period. The readout reserves a minimum width (one floor for Week, whose range labels are half again as wide; one shared by Month / Quarter / Year, so switching between them moves nothing) and grows past it if a label runs long, rather than clamping to a fixed box and ellipsising. Where a scale's natural label would need a box no other scale comes close to filling, the label is shortened deliberately — `Sep 2026`, not a cut-off `September 2026`.
+
+Everything that acts on the canvas rather than on what the canvas shows — **Fit**, **zoom out / in**, **Legend** — lives in a small floating **utility dock** in the bottom corner of the chart itself. It is one reach away, stays visually quiet (ghost controls on a bordered card surface), and does not compete with the primary controls above. The dock is absent while the empty state is showing: there is nothing to fit, zoom or read a legend for.
+
+### Portfolio view (Year / Quarter)
 
 The portfolio / stakeholder view. Optimizes for: project duration, priority, Owner Squad, Design Lead, project phase, Committed vs Tentative, and overall portfolio overlap. Stays visually concise — this is the view a Design Lead presents to stakeholders.
 
@@ -864,9 +1018,9 @@ Project timeline
 Project phases
 ```
 
-Default horizon: approximately 6 months, with Previous / Next navigation.
+Default horizon: approximately 6 months, with Previous / Next / Today navigation.
 
-### Week View
+### Operational view (Month / Week)
 
 The Design Lead's operational-planning view. Answers "what is this project focusing on this week?" — it is **not** a task-management feature (no task status, assignee, subtasks, checklist, story points, sprint planning, Kanban, task comments, per-task priority, per-task workload, or completion percentage; see §8.9 and §38).
 
@@ -875,31 +1029,32 @@ Header groups week columns under their month, and clearly marks a transition int
 ```text
 Timeline
 
-[Today] [Previous]   Sep 2026   [Next]              [Month] [Week]
+Search projects...   Filter · 2                     Today  ‹ Q3 2026 ›
+Squad A ×  At Risk ×                          Week  Month  Quarter  Year
 
-SEP 2026
-Sep 7 (W2)   Sep 14 (W3)   Sep 21 (W4)   Sep 28 (W5)
+Q3 2026
+Sep 7   Sep 14   Sep 21   Sep 28
+
+   ...project rows...
+                                                 Fit │ −  + │ Legend
 ```
 
-The Project column is identical to Month View (sticky, same fields) and is not repeated per week:
+Previous / Next step by the selected scale — a week in Week, a month in Month, a quarter in Quarter, a year in Year — and the readout between them names the period the same way: `7 – 13 Sep 2026`, `Sep 2026`, `Q3 2026`, `2026`.
+
+The **Week** scale is the finest the product offers. Day columns under a project bar is where a Design Lead plans the week itself, and it is the scale where the granular layer below each project bar — Weekly Focus today — earns its room. Deliberately no Day scale: a design project is scheduled in weeks and months, and an hour axis under a four-month bar answers no planning question (`docs/DECISIONS.md`).
+
+The Project column is identical at every scale (sticky, same fields), 280–320px wide by default, and can be widened or narrowed by dragging the divider between it and the chart:
 
 ```text
 Trade Finance Platform Revamp
 [P1] Squad A · Malik
 ```
 
-Each week cell may show the active phase plus a short Weekly Focus preview, kept concise (no paragraphs in the grid):
+The project **name** is the strongest text in the row and wraps to two lines before anything is cut — identifying a project matters more than reserving empty chart space, and `Trade Finance Platform Rev…` identifies nothing. The metadata line under it (priority badge, Owner Squad, Design Lead) stays small and muted, one line, truncated. Rows are roomy enough to read at a glance: ~56px per row with a ~28px bar, growing only when a row carries a second lane.
 
-```text
-Research
+Below the Year scale, each Weekly Focus item renders as its own one-week band stacked underneath its project's bar, on the same row — a quiet neutral wash with its title in it, not a third bar style competing with Committed/Tentative. Clicking one opens a dialog with the full week detail (phase + that week's full Weekly Focus list) — do not navigate away from Timeline to inspect it. Weekly Focus bars are deliberately absent at Year scale, where a week is too narrow to read and the portfolio should stay one bar per project.
 
-Requirement mapping
-+1 more
-```
-
-When a project has more Weekly Focus items than fit, show a `+N more` affordance. Clicking a week cell opens a small popover/sheet/dialog with the full week detail (phase + full Weekly Focus list) — do not navigate away from Timeline to inspect it.
-
-Default horizon: approximately 6–8 weeks, with Previous / Next navigation. Do not render an excessively wide weekly timeline by default.
+A Weekly Focus bar can be dragged to another week; it always snaps to that week's Monday, and it cannot be resized — a focus is one week by definition (§8.9).
 
 ### Interactions
 
@@ -907,41 +1062,50 @@ Required:
 
 * hover project
 * click project → Project Detail
-* horizontal timeline navigation (Month and Week)
-* filtering
-* Month ↔ Week toggle
-* click a Week View cell → Weekly Focus detail (popover/sheet/dialog, no navigation away)
+* horizontal timeline navigation (Today / Previous / Next) at every scale, stepping by that scale
+* search and filtering
+* switching scale
+* zoom from the canvas utility dock, and Ctrl/Cmd + wheel / trackpad pinch
+* **Fit** — put the projects currently on screen into one frame: the coarsest scale their whole span still needs, at natural zoom, centred on that span. A secondary action in the canvas utility dock, useful right after a filter change, a scale switch or a long scroll
+* **drag a project bar to reschedule it**, and **resize either end** to change its start or end date — both snap to whole days and write straight back to the project's `start_date` / `end_date`
+* click a Weekly Focus bar → Weekly Focus detail dialog (no navigation away)
 
-Drag-and-drop rescheduling is **not required** for MVP, in either view.
+Completed and Cancelled projects are **read-only** on the Timeline: their `end_date` is a historical record written by Mark as complete (§25), and a stray drag must not rewrite it.
+
+Rescheduling never cascades. There are no dependencies between projects, so nothing else moves when a bar moves (§30). Monthly Target rows whose month falls outside the new range are **kept**, not deleted — they become invisible until the range covers them again, and the Edit wizard remains the only place that drops them, with its existing confirmation.
 
 ### Filters
 
-Month View and Week View share the same filters:
+Filtering is a secondary act on a chart you are looking at, so only two controls are permanently visible:
 
 ```text
-Search
-Owner Squad
-Priority
-Status
-Department
-Epic
-Health
-Show archived
+[ Search projects... ]  [ Filter ]
 ```
 
-Optional:
+**Search** matches project name, Owner Squad, Department, Epic, and any designer assigned to the project — a quick lookup, not a second filter surface.
+
+Everything else lives in the **Filter** popover, which lists one control per dimension and applies immediately (no staged Apply — the chart is right there to read the result off):
 
 ```text
-Designer
+Filter projects
+
+Squad · Priority · Status · Department · Epic · Health · Designer
+
+Project visibility
+[ ] Include archived projects
+
+Clear all                                                    Done
 ```
 
-Switching Month ↔ Week preserves active filters where practical.
+The Filter button carries the count of active dimensions (`Filter · 2`), and each one also appears under the toolbar as a removable chip. Chips show only when something is active, stay visually secondary, and `Clear filters` resets everything including the search query.
 
-**Done and Archived projects are hidden from Timeline by default in both views.** Use the Status filter (and the Show archived toggle) to bring them back into view.
+Changing scale preserves active filters.
+
+**Completed, Cancelled, and Archived projects are hidden from Timeline by default at every scale.** Use the Status filter (and `Include archived projects`) to bring them back into view.
 
 ### Current time indicator
 
-Month View: highlight the current month, with a subtle current-time vertical indicator. Week View: clearly highlight the current week. In both views, keep the indicator subtle — do not over-emphasize it visually.
+A now-line marks the present instant at every scale, labelled `Today` in the date header so it names itself instead of leaving the reader to decode a coloured column, and the column containing today is highlighted. Both use the brand accent, never the destructive red — red on this screen means Blocked. Keep both subtle. Non-working days (weekends) are muted at the scales where individual days are visible.
 
 ### Visual rules
 
@@ -959,11 +1123,19 @@ dashed / reduced opacity timeline
 
 Priority should use subtle badge treatment.
 
-Avoid excessive saturated colors, rainbow phase coloring, a separate card per week, excessive pills, and dense borders. The Timeline (project rows and grid) must stay the dominant visual element on the page — filters and the view toggle stay restrained.
+A bar reads as **duration + commitment**, in one neutral brand hue: Committed is a solid fill inside a solid border, Tentative a light fill inside a dashed one. The difference has to be obvious without the legend (§31 — never colour alone).
+
+**Health is separate from the bar's own state, and exception-driven.** A bar does not take the colour of its health: a portfolio of strong green bars says nothing, and it drowns out the two states worth reacting to. Instead, At Risk and Blocked each show a small dot at the start of their bar (Blocked strongest, At Risk medium); On Track carries no marker at all. Full health is always one hover away in the bar tooltip, which reads: project name, start and end date, duration, commitment, health.
+
+Avoid excessive saturated colors, rainbow phase coloring, excessive pills, and dense borders. Grid lines stay minimal — period boundaries only, no row rules, and the body's lines lighter than the header's. The Timeline (project rows and grid) must stay the dominant visual element on the page — filters, the scale control and the legend stay restrained.
+
+### Legend
+
+One click away, not permanently parked above the chart: a `Legend` button in the canvas utility dock opens a small popover covering Committed / Tentative / Weekly focus and the two health exceptions. Commitment should already be readable from the bars themselves; the legend exists for the parts that can't be inferred.
 
 ### Responsive behavior
 
-Desktop-first. Week View will naturally require horizontal scrolling — keep the Project column sticky and let week columns scroll horizontally. Do not compress week columns until their text becomes unreadable.
+Desktop-first. Every scale requires horizontal scrolling — keep the Project column sticky and let the time columns scroll. Do not compress columns until their text becomes unreadable; zoom out to a coarser scale instead.
 
 ---
 
@@ -998,6 +1170,26 @@ Filter
 Sort
 ```
 
+### Lifecycle tabs
+
+Above the filter toolbar, a segmented control scopes the list by lifecycle:
+
+```text
+Active   Completed   All
+```
+
+Default: **Active** = Status ∈ {Planning, In Progress, On Hold}. **Completed**
+= Status = Completed only. **All** = every status, Cancelled included.
+Switching tabs clears any Status filter selection currently applied, since
+the tab is itself the primary status scope. The granular Status filter
+(below) is only shown, and only meaningful, inside the All tab — Active and
+Completed already imply their own scope.
+
+This "Active" is deliberately broader than Overview's Active Projects KPI
+(§14.1, Planning + In Progress only) — see that section for why the two
+definitions coexist. Archived visibility is independent of the tab and
+stays the existing "Show archived" toggle (below) in every tab.
+
 ### Filters
 
 A compact toolbar sits directly above the table (no large standalone filter card):
@@ -1016,16 +1208,16 @@ Owner Squad
 Design Lead
 Timeline
 Health
-Show archived projects
+Show archived
 ```
 
 These are staged — changes take effect on "Apply" (or are cleared immediately by "Reset"), not as each field is touched. Owner Squad and Design Lead are searchable.
 
-**Timeline** buckets a project's Start/End month against the current month: `Active now` (current month falls within the range), `Upcoming` (starts later), `Past` (already ended). See `docs/DECISIONS.md` for why this is a simple bucket rather than a full date-range picker.
+**Timeline** buckets a project's start/end date against today: `Active now` (today falls within the range), `Upcoming` (starts later), `Past` (already ended). See `docs/DECISIONS.md` for why this is a simple bucket rather than a full date-range picker.
 
 At narrower widths, Department (then Priority and Status) drop from the toolbar in favor of the Filters panel, which always additionally exposes Status/Priority/Department so they stay reachable — see `docs/DECISIONS.md`. The toolbar never wraps into multiple rows.
 
-Active filters (beyond Search) show as a row of small removable tokens directly under the toolbar, with a "Clear all" action; the row is absent entirely when no filter is active.
+Active filters (beyond Search) show as a row of small removable tokens directly under the toolbar; the row is absent entirely when no token would appear (a Search query alone does not produce one). Clearing everything is the shared toolbar's single "Clear filters" action — see §29.1.
 
 ### Default sort
 
@@ -1047,42 +1239,60 @@ Primary button:
 + Add Project
 ```
 
-### Done and Archived Projects
+### Completed, Cancelled, and Archived Projects
 
-Unlike Overview and Timeline, the Projects page may show `Done` and `Archived` projects — reachable via the Status filter and an Archived toggle, not shown by default alongside active work.
+Unlike Overview and Timeline, the Projects page can show every status and
+archived projects too — reachable via the lifecycle tabs above, the Status
+filter (inside All), and the Show archived toggle, not shown by default
+alongside active work. Deleting a project (§25) is always available from
+this list's row menu as well as from Project Detail.
 
 ---
 
 # 14.4 Project Detail
 
-Project Detail should quickly answer:
+A Project Control Page, not a database record dump — scannable in a few
+seconds, not read field by field. Project Detail should quickly answer:
 
 ```text
-What is this project?
-Where does it come from?
+What project is this?
+What is its current status?
+Is it healthy / on track?
 Who owns it?
-When does it run?
-Who is designing it?
+Who is working on it?
+What is its timeline?
+What needs attention?
+Is it still active or already completed?
 ```
 
-Recommended layout:
+One primary content surface (Overview / Design Team / Timeline & Monthly
+Targets / Weekly Plan, separated by subtle dividers and section headings,
+not stacked cards) plus a lightweight "Project Details" footer for metadata.
 
 ## Header
 
 ```text
-Trade Finance
+← Projects
 
-P1
-In Progress
-On Track
-Committed
+Trade Finance                                          [Edit]  [•••]
 
-Sep — Dec 2026
+P1   In Progress   ● On Track   Committed
+Sep 2026 — Dec 2026
 ```
+
+The title is the strongest element on the page. Priority, Status, Health,
+Timeline Confidence, and the month range sit directly under it as compact
+indicators — badges only where an attribute genuinely benefits from strong
+visual distinction. Health is never color alone: the dot always sits beside
+the word ("On Track"), never in place of it.
+
+**Edit** is the one primary action. Every other lifecycle action lives
+behind **•••** (the overflow menu), contextual on the project's current
+status — see §25 for exactly which actions appear in which state.
 
 ---
 
-## Project Context
+## Overview
 
 ```text
 Epic
@@ -1091,69 +1301,80 @@ Trade Finance
 Department
 Wholesale Banking
 
-Department Head
-Budi Santoso
+Product Owner
+Sarah Wijaya, Ahmad Fikri
 
-Product Owners
-Sarah Wijaya
-Ahmad Fikri
+Department Head (ⓘ)
+Budi Santoso
 
 Project Admin / PIC
 Nadia Putri
 ```
 
+Empty values are worded consistently across this whole page: `Not set` for
+missing configuration (Epic, Department, Owner Squad), `Not assigned` for
+missing people (Department Head, Product Owner, Project Admin/PIC, Squad
+Lead, Project Design Lead) — never a bare `–`, `None`, or `Unassigned` mixed
+in. The Department Head's "snapshot at creation, may differ from the
+department's current head" caveat is an info-icon tooltip next to the label,
+not permanent body text under the value.
+
 ---
 
-## Design Ownership
+## Design Team
 
 ```text
 Owner Squad
 Squad A
 
 Squad Lead
-Dimas
+[avatar] Dimas
 
 Project Design Lead
-Malik
+[avatar] Malik
 
 Supporting Designers
-Sarah
-Raka
+[avatar] Sarah
+[avatar] Raka
++ Add designer
 ```
 
-If designer comes from another squad:
+Squad Lead and Project Design Lead both show a person's avatar, not just a
+name — this section should read as people, not generic metadata. If
+designer comes from another squad:
 
 ```text
 Raka
 Support
-Squad B
 Cross-squad
 ```
 
-If no Project Design Lead is assigned, display `Project Design Lead: Unassigned` rather than omitting the field.
+If no Project Design Lead is assigned, show `Not assigned` plus an inline
+`Assign` action (not an omitted field) — the Assign action is visually
+secondary to the name it sits beside.
 
 ---
 
 ## Timeline & Monthly Targets
 
-Example:
+A scannable, project-level summary — month, phase, and outcome per month,
+not a full Gantt chart (the detailed timeline is the Timeline feature,
+§14.2). Example:
 
 ```text
-SEP
-Research
-Requirement alignment
+Sep          Oct          Nov          Dec
+Discovery    Design       Validation   Handover
+```
 
-OCT
-Exploration
-UX direction approval
+Empty state is actionable, not a passive one-liner:
 
-NOV
-Design
-Final UI
+```text
+No monthly targets yet
 
-DEC
-Handover
-Developer handoff
+Break the project timeline into monthly outcomes so the team can see
+what is expected each month.
+
+[+ Add monthly target]
 ```
 
 ---
@@ -1180,21 +1401,17 @@ Exploration
 
 ---
 
-## Meta Information
+## Project Details
+
+A lightweight footer below the main content surface, not a large card —
+typography stays subtle since this information is secondary.
 
 ```text
-Created
-Updated
-Last updated by
+Created Aug 1, 2026
+Last updated Sep 10, 2026
 ```
 
-Show:
-
-```text
-Updated 2 days ago
-```
-
-If data is old, system may show subtle warning:
+If data is old, a subtle warning sits alongside it:
 
 ```text
 Needs review
@@ -1206,7 +1423,9 @@ Suggested threshold:
 14 days without update
 ```
 
-This is optional but recommended.
+This is optional but recommended, and only ever shown for a project that is
+still Planning or In Progress — a Completed, Cancelled, or On Hold project
+is never flagged as needing review.
 
 ---
 
@@ -1300,7 +1519,7 @@ Cross-squad
 
 ### Person Timeline
 
-Important MVP feature. Month granularity only — the Week View introduced for the portfolio Timeline (§14.2) does not apply here; Person Timeline is about overlap across projects, which reads better at month scale.
+Important MVP feature. Month granularity only — the finer scales on the portfolio Timeline (§14.2) do not apply here; Person Timeline is about overlap across projects, which reads better at month scale. Its months are derived from each project's `start_date` / `end_date` (§8.2), so day-level dates never leak into this view.
 
 Example:
 
@@ -1341,6 +1560,8 @@ Lead: Raka
 ```
 
 Click squad → Squad Detail.
+
+A squad with zero members shows "No designers · Add" in its row. **Add** opens a dialog to search and multi-select Active designers and assign them to this squad in one step, without leaving Teams. Since Home Squad is a single required field per Designer (§8.1), selecting a designer here moves them out of whichever squad they currently belong to — the dialog lists each candidate's current squad so this is never a surprise. Squad Lead stays a link out to Master Data (unchanged).
 
 ---
 
@@ -1422,6 +1643,156 @@ Stakeholders
 
 ---
 
+# 14.10 Settings
+
+Navigasi utama:
+
+```text
+Settings
+```
+
+Ada di area utility footer sidebar, bukan di grup Planning atau Administration (§7).
+
+Sub-navigasi: rail vertikal di sebelah konten pada layar lebar, dan baris underline yang sama seperti Master Data pada layar sempit.
+
+```text
+General
+Profile
+Security
+```
+
+`/settings` mengarahkan ke `/settings/general`.
+
+## Aturan visual
+
+Kolom konten dibatasi lebarnya (~2xl), tidak melebar mengikuti monitor — ini form, dan input yang membentang 32 inci lebih sulit dipakai, bukan lebih lega.
+
+Setiap bagian adalah judul + deskripsi + field, dipisah `Separator`. **Bukan** kartu per bagian: lima kotak bertumpuk akan membuat satu kolom form terbaca sebagai lima halaman (§29).
+
+## General
+
+```text
+General
+Manage your default preferences across DesignOps.
+```
+
+Section `Regional`:
+
+```text
+Language          hanya English yang bisa dipilih
+Timezone          default Asia/Jakarta
+Week starts on    Monday | Sunday, default Monday
+```
+
+Bahasa Indonesia tetap terlihat di dropdown, dalam keadaan disabled, dengan penanda `Coming soon`. Gunakan warna muted — bukan warna warning atau error; tidak ada yang salah, hanya belum siap. Jangan membuat terjemahan parsial, dan jangan memperlakukan `'id'` sebagai bahasa runtime yang didukung.
+
+Section `Workspace defaults`:
+
+```text
+Default landing page     Overview | Projects | Timeline, default Overview
+Default timeline view    Week | Month | Quarter | Year, default Month
+```
+
+`Year` ikut ditawarkan karena Timeline memang punya skala itu (§14.2) — preferensi yang tidak bisa menyebut skala yang ada bukan preferensi yang lengkap.
+
+Section `Appearance`:
+
+```text
+Theme    Light | Dark | Match system, default Light
+```
+
+## Bagaimana preferensi dipakai
+
+Nilai yang disimpan selalu kode stabil (`'overview'`, `'monday'`), tidak pernah label yang tampil.
+
+```text
+timezone                Timeline membaca batas hari dan penanda Today dengan zona ini
+week_starts_on          kolom pertama setiap date picker
+default_landing_page    tujuan setelah masuk aplikasi
+default_timeline_view   skala saat Timeline dibuka
+theme                   kelas tema pada dokumen
+```
+
+Urutan prioritas untuk Timeline:
+
+```text
+pilihan eksplisit pada sesi ini
+-> preferensi tersimpan
+-> default aplikasi
+```
+
+`week_starts_on` **tidak** menggeser kolom minggu di Timeline. Project Weekly Focus selalu tercatat pada hari Senin (§8.9) dan dijaga oleh constraint database, jadi kolom Minggu-mulai-Minggu akan memotong setiap band focus menjadi dua.
+
+## Profile
+
+```text
+Profile
+Manage your personal information and identity across DesignOps.
+```
+
+```text
+Profile photo     inisial dari nama; belum ada upload
+Full name         wajib
+Job title         opsional
+Design role       opsional
+Designer record   tautan ke Designer (§6.1)
+Email             read-only
+Access level      read-only
+```
+
+Email read-only dan tidak boleh diubah dari sini sampai ada alur verifikasi email yang benar (§38). Access level ditampilkan sebagai fakta, bukan sebagai kontrol yang di-disable.
+
+## Security
+
+```text
+Security
+Manage your password and account security.
+```
+
+Hanya satu section: `Password` — Current password, New password, Confirm new password. Minimal 8 karakter. Field dikosongkan setelah berhasil.
+
+Jangan tambahkan sekarang: 2FA, passkey, security key, daftar session, manajemen device, login history (§38).
+
+## Form behaviour
+
+Semua form Settings memakai save eksplisit:
+
+```text
+Save changes / Saving…
+Change password / Updating…
+```
+
+Tombol mati sampai benar-benar ada yang berubah, tidak bisa disubmit dua kali, isian tidak hilang saat request berjalan, sukses dikonfirmasi toast (§29.2), gagal dijelaskan inline. Tidak ada auto-save.
+
+Halaman Settings tidak boleh menampilkan nilai default lalu mengoreksi dirinya sendiri setelah data datang — preferensi sudah ada di cache sebelum layar ini render (§34).
+
+---
+
+# 14.11 Menampilkan user yang sedang login
+
+Di setiap people picker, record orang milik user yang sedang login ditandai:
+
+```text
+[DA] Dimas Aditya (Me)
+     Senior Product Designer
+
+[AP] Andi Pratama
+     Product Designer
+```
+
+Aturan:
+
+* `(Me)` adalah **sufiks**, bukan pengganti nama. Squad lead bernama "Me" tidak bisa dibaca orang berikutnya yang membuka record itu.
+* Tidak ada user "Me" sebagai record, pseudo-designer, atau opsi hardcoded. Nilai yang disimpan selalu id Designer yang sebenarnya.
+* User yang sedang login tidak disuntikkan ke dalam daftar. Ia ada di sana karena ia memang seorang Designer, sama seperti yang lain.
+* Logika `(Me)` tinggal di satu helper bersama, tidak diulang per layar.
+
+Picker orang menampilkan avatar, nama, dan satu baris sekunder (job title) — cukup untuk membedakan dua orang, tidak lebih.
+
+Picker yang memakai aturan ini: Squad Lead (Master Data → Squads), Project Design Lead dan Supporting Designers (Add/Edit Project), aksi inline `Assign` untuk Design Lead, dan dialog `Add designers` di Teams.
+
+---
+
 # 15. Master Data — Designers
 
 Admin can:
@@ -1430,6 +1801,7 @@ Admin can:
 Create
 Edit
 Deactivate
+Delete
 ```
 
 Fields:
@@ -1443,16 +1815,9 @@ Avatar
 Status
 ```
 
-Designers are never permanently deleted, regardless of whether they are connected to historical projects.
+Use `Active` / `Inactive` to retire a designer that is still connected to historical projects — an Inactive designer remains visible wherever that history references them (past assignments, People history).
 
-Use:
-
-```text
-Active
-Inactive
-```
-
-An Inactive designer remains visible wherever historical Project data references them (past assignments, People history).
+**Delete** permanently removes a designer, but only when nothing currently references them: no Project Assignment row (Lead or Support, on any project regardless of that project's own status or archive state) and no Squad's Squad Lead. If either is true, Delete is blocked with a message naming what's still using it — deactivate instead. This guard is what keeps historical Project context from ever breaking (docs/DECISIONS.md); it is the same rule for every Master Data entity in §15–19 and for Project itself (§25).
 
 ---
 
@@ -1467,7 +1832,7 @@ Description
 Status
 ```
 
-Squads are never permanently deleted. Use `Active` / `Inactive` (matching Designers, §15) — an Inactive squad remains available wherever historical Project data references it as Owner Squad.
+Use `Active` / `Inactive` (matching Designers, §15) to retire a squad still connected to historical projects — an Inactive squad remains available wherever historical Project data references it as Owner Squad. **Delete** is blocked while any Designer has this squad as their Home Squad or any Project references it as Owner Squad.
 
 Members do not need to be manually maintained twice.
 
@@ -1492,7 +1857,7 @@ Status
 
 Department Head references Stakeholder Master Data (`stakeholder_type = Department Head`, §8.4/§19) — no arbitrary free text. It is the department's current head, used to auto-fill Department Head on new Projects (§21) and re-derive it when a Project's Department changes (§25).
 
-Departments are never permanently deleted. Use `Active` / `Inactive` — an Inactive department remains available wherever historical Project data references it.
+Use `Active` / `Inactive` to retire a department still connected to historical data — an Inactive department remains available wherever historical Project data references it. **Delete** is blocked while any Epic or Project still references it.
 
 ---
 
@@ -1509,7 +1874,7 @@ Status
 
 Epic selector in Project form must use this master.
 
-Epics are never permanently deleted. Use `Active` / `Inactive` — an Inactive epic remains available wherever historical Project data references it.
+Use `Active` / `Inactive` to retire an epic still connected to historical projects — an Inactive epic remains available wherever historical Project data references it. **Delete** is blocked while any Project still references it.
 
 ---
 
@@ -1537,7 +1902,7 @@ Project form dropdowns must pull data from this master. Every project reference 
 
 Do not hardcode stakeholder names directly inside project form.
 
-Stakeholders are never permanently deleted. Use `Active` / `Inactive` — an Inactive stakeholder remains available wherever historical Project data references them.
+Use `Active` / `Inactive` to retire a stakeholder still connected to historical data — an Inactive stakeholder remains available wherever historical Project data references them. **Delete** is blocked while any Department still names them as its head, or any Project still references them as a department-head snapshot, Product Owner, or Project Admin/PIC.
 
 ---
 
@@ -1606,11 +1971,13 @@ However the UI should still clearly show Department.
 Fields:
 
 ```text
-Start Month *
-End Month *
+Start Date *
+End Date *
 ```
 
-After selecting timeline, generate month rows.
+Both are day-level dates (§8.2), inclusive. After selecting the timeline,
+generate one month row per month the range spans — the months are derived
+from the dates, not entered separately.
 
 This step has two sub-views, kept lightweight, switched with a small segmented control:
 
@@ -1787,24 +2154,91 @@ If Department is changed on an existing Project, Department Head is re-derived f
 
 ---
 
+## Project Lifecycle Actions
+
+From Project Detail's overflow menu (§14.4), contextual on the project's
+current Status:
+
+```text
+Planning / In Progress:  Mark as complete · Put on hold · Cancel project
+On Hold:                 Resume project · Mark as complete · Cancel project
+Completed / Cancelled:   Reopen project
+```
+
+**Mark as complete** opens a confirmation with a completion date (defaults
+to today, editable) and sets Status to Completed. If the project's own
+`end_date` falls after the chosen date, a warning names how many
+designers are assigned and offers a choice: **keep** the existing
+`end_date` as a historical record, or **end** it by shortening `end_date`
+to the completion date. Neither choice ever touches Project Assignment
+rows — there is no per-assignment date to change (docs/DECISIONS.md).
+
+**Put on hold** sets Status to On Hold immediately — no confirmation, and no
+change to assignments, monthly targets, or timeline.
+
+**Cancel project** requires confirmation (its status becomes permanent
+unless reopened) and sets Status to Cancelled. **Resume project** (from On
+Hold) and **Reopen project** (from Completed/Cancelled) both set Status to
+In Progress immediately, with no confirmation — reversible, non-destructive.
+Reopen additionally clears the completion date. None of these actions
+deletes or resets timeline, assignment, or monthly-target data.
+
 ## Archiving a Project
 
-Archive is a separate concept from Status. A Project can be `Done` and not archived (kept visible as recent history), or archived at any Status, if it should be removed from normal operational views (Overview, Timeline) without being deleted.
+Archive is a separate concept from Status. A Project can be `Completed` and not archived (kept visible as recent history), or archived at any Status, if it should be removed from normal operational views (Overview, Timeline) without being deleted.
 
-Archiving:
+Archiving requires confirmation (Unarchiving does not) and:
 
 - sets `is_archived = true` (§8.6),
 - does not change Status, Health, or any assignment data,
 - removes the project from Overview and Timeline by default,
 - keeps the project fully visible on the Projects page via an Archived filter/toggle (§14.3).
 
-There is no permanent delete for Projects. Un-archiving is always possible (`is_archived = false`).
+Un-archiving is always possible (`is_archived = false`).
+
+## Deleting a Project
+
+Delete permanently removes a Project and every row that exists only in
+relation to it — its Project Assignments, Monthly Targets, and Weekly Focus
+items. Nothing else in the data model references a Project by id, so unlike
+Master Data (§15–19) there is no "still in use" guard to run first; Delete
+always requires confirmation naming the project, since it is irreversible.
+Master data the project referenced (its Owner Squad, Epic, Department,
+stakeholders, designers) is untouched.
+
+## Deleting Master Data that is still in use
+
+Every Master Data entity (§15–19) is guarded: before the confirm dialog opens,
+the app counts live references to the record and, if any exist, says what is
+still using it.
+
+For **Designer** and **Stakeholder** that guard can be overridden with
+`Delete anyway`. The dialog names what will happen before offering it:
+
+- **Designer** — removed from every project they were assigned to, and any
+  squad they led is left with no lead. If they were a project's Design Lead,
+  that project becomes unassigned (§26).
+- **Stakeholder** — removed from every project's Product Owner and Project
+  Admin lists and from its department-head snapshot (§8.6), and any department
+  they headed is left with no head.
+
+For **Squad**, **Department** and **Epic** there is no override. A project
+cannot exist without an owner squad, an epic and a department, and a designer
+cannot exist without a home squad, so "delete anyway" there would mean
+destroying projects or designers rather than detaching them. These stay
+blocked; retire them with Inactive instead.
+
+`Delete anyway` is the only action in the product that discards data the user
+cannot recover, so it always states its consequence in the dialog rather than
+relying on the word "anyway" to carry the warning. Setting the record to
+`Inactive` remains the non-destructive way to retire someone who has left —
+it hides them from every picker while keeping project history intact.
 
 ---
 
 # 26. Unassigned Projects
 
-A project can exist without Supporting Designer, and without a Project Design Lead, at any Status (Proposed, Planning, In Progress, On Hold). This is a normal, valid state — never a validation error that blocks creating or saving a project.
+A project can exist without Supporting Designer, and without a Project Design Lead, at any Status. This is a normal, valid state — never a validation error that blocks creating or saving a project.
 
 For a project considered active (`Active Projects` = Planning + In Progress, §14.1), a missing Project Design Lead should be visually noticeable.
 
@@ -1873,7 +2307,7 @@ Add designers to start mapping your design team.
 Example Project:
 
 ```text
-No projects found
+No projects yet
 
 Create your first project to start building the portfolio.
 
@@ -1883,7 +2317,7 @@ Create your first project to start building the portfolio.
 Filtered state:
 
 ```text
-No projects match these filters.
+No projects match these filters
 
 [Clear filters]
 ```
@@ -1936,6 +2370,8 @@ shadcn/ui
 
 Icon library: shadcn's own primitives (Button, Dialog, etc.) use Hugeicons per the preset; existing app code continues to use lucide-react directly — both packages are present, not a full migration.
 
+Button sizing: three fixed heights — `sm` 32px (compact contexts: table row actions, dense toolbars, compact filters), `md` 40px (default when no size is specified — form actions, modal actions, filters, navigation, standard CTAs), `lg` 48px (prominent/emphasis actions only). Icon-only buttons follow the same square dimensions (32×32 / 40×40 / 48×48). An additional `xs` (24px) tier remains for pre-existing very dense inline controls (e.g. row-level remove buttons); it is not part of the standard 3-tier scale and should not be used for new call-to-action buttons.
+
 Typography: Geist is the product's single font family — headings, body text, labels, tables, buttons, forms, and navigation all use it (one font load, no mixed-font pairing). Consistent with the PRD's original "Inter or Plus Jakarta Sans" direction (Geist is the same geometric-sans family).
 
 Desktop-first target:
@@ -1948,34 +2384,119 @@ Application should remain usable down to tablet width.
 
 Mobile optimization is not required for MVP.
 
+## 29.1 Filter toolbar (shared across every list screen)
+
+Projects, Timeline, People, Teams, and all five Master Data screens use one
+shared filter toolbar, so filtering behaves and reads the same everywhere.
+
+Layout, in a single wrapping row:
+
+```text
+Search   <the screen's own filters>   Clear filters
+```
+
+* **Search** sits first and is always the same width. `Cmd/Ctrl+K` focuses it
+  from anywhere on the page. Matching is case-insensitive substring matching on
+  the trimmed query, debounced by 250 ms so the list doesn't re-filter on every
+  keystroke. Which fields a screen searches is listed in that screen's own
+  section.
+* **Filters** are dropdown buttons. Each one names its dimension before a value
+  is picked ("Department") and reads `Dimension: Value` after ("Department:
+  Wholesale Banking"), so several active filters stay unambiguous at a glance.
+  Dropdowns over long lists (squads, departments, epics, designers, design
+  leads) are searchable. Timeline is the exception to the row layout: it is a
+  canvas, not a table, so every dimension collapses into one `Filter` popover
+  and only Search + Filter stay on screen (§14.2).
+* **Clear filters** is the only reset action, appearing at the end of the row
+  once anything is active — including a Search query. Projects' Advanced
+  Filters panel keeps its own staged Reset/Apply footer, which is separate.
+
+The "All" row at the top of each dropdown is worded by what the filter selects:
+`All <entities>` for a list of records (All squads, All epics, All departments,
+All designers, All design leads), `All <values>` for an enum (All statuses, All
+priorities, All health statuses, All types), and `Any <dimension>` for a
+derived yes/no predicate (Any timeline, Any staffing, Any lead, Any
+assignment).
+
+Filter state is per screen and resets on navigation — it is deliberately not
+kept in the URL. The one exception is Projects, which reads `designLead`,
+`health`, and `status` once on mount so Overview can drill down into it; it
+never writes those params back. See `docs/DECISIONS.md`.
+
+No screen shows a result count. Empty states are worded the same everywhere:
+`No <entities> yet` before any data exists, and `No <entities> match these
+filters` with a `Clear filters` action when filtering returns nothing.
+
+## 29.2 Write confirmations (shared across every screen)
+
+Every write that succeeds raises one toast in the bottom-right corner. Reads,
+filters, navigation and opening a dialog never do.
+
+* **Wording is `<the thing> <what happened>`** and nothing more: `Sarah Chen
+  updated`, `Trade Finance archived`, `Merchant Revamp rescheduled`. Naming the
+  record is what makes the toast worth reading — the user already knows they
+  pressed Delete, but not always which row was focused when they did.
+* **One toast per user action**, not per row written. Saving the project wizard
+  touches assignments, monthly targets and weekly focus rows; it confirms once.
+  Moving several designers into a squad confirms once, with the count.
+* **Toasts confirm, they do not ask.** Anything needing a decision stays a
+  confirmation dialog (§25, §33). A failed or refused write is reported where
+  the user is working — inline field errors, a dialog that stays open — not in a
+  toast they may have already looked away from.
+* **No undo action** in the MVP. Destructive actions are already gated by a
+  confirmation dialog, so the toast is a receipt, not a second chance.
+
+Screens that raise them: all five Master Data screens (create, update, delete,
+Active/Inactive toggle), Add/Edit Project, Project Detail lifecycle actions
+(hold, resume, reopen, cancel, complete, archive, restore, delete), Timeline
+drag-to-reschedule and Weekly Focus moves, Squad Detail designer assignment,
+and the inline Assign Design Lead control (§26).
+
+---
+
 ---
 
 # 30. Timeline UX Requirements
 
-Timeline should prioritize readability over complex Gantt functionality.
+Timeline should prioritize readability over exhaustive Gantt functionality. Every capability below earns its place by answering a planning question a Design Lead actually asks; anything that only makes the chart look more capable stays out.
 
 Required:
 
 ```text
-Sticky project-name column
+Sticky project-name column, resizable, wide enough for a two-line project name
 Horizontal scrolling
-Month header (Month View) / week header grouped by month (Week View)
-Current month indicator (Month View) / current week indicator (Week View)
-Project bars (Month View) / phase + Weekly Focus preview per week cell (Week View)
-Phase labels
-Click → Project Detail
-Month ↔ Week view toggle (§14.2)
+Time axis grouped one level up (months under quarters, weeks under months, and so on)
+Labelled now-line and current-column highlight
+Row hover that tracks across the project column and the canvas together
+Project bars
+Weekly Focus bands below the Year scale
+Click a project bar → Project Detail
+Click a Weekly Focus band → week detail dialog
+Hover a bar → project name, dates, duration, commitment, health
+Scale segmented control: Week / Month / Quarter / Year (§14.2)
+Zoom within a scale from the canvas utility dock, and Ctrl/Cmd + wheel / pinch
+Fit
+Drag a project bar to reschedule it
+Resize either end of a project bar
+Empty state when filtering leaves nothing to draw, with the filters still in reach
 ```
 
 Not required:
 
 ```text
-drag project
-resize project bar
 dependencies
 critical path
-zoom by day (no Day View)
+% complete / progress bars on bars
+baselines (planned vs actual)
+grouping projects into a collapsible tree
+recurring bars
 ```
+
+Drag and resize were out of scope before day-level dates existed on Project;
+they are in scope now that `start_date` / `end_date` give them something exact
+to write to. Dependencies and critical path remain out of scope — this product
+plans a design portfolio, not a construction schedule, and nothing in the
+domain model expresses a blocking relationship between projects.
 
 ---
 
@@ -2004,11 +2525,11 @@ Blocked
 Status:
 
 ```text
-Proposed
 Planning
 In Progress
 On Hold
-Done
+Completed
+Cancelled
 ```
 
 Timeline confidence should primarily use visual pattern:
@@ -2089,35 +2610,22 @@ epicService
 stakeholderService
 ```
 
-Components should not directly import large mock arrays, and must not access `localStorage` (or any storage mechanism) directly. All reads and writes go through the service/repository layer:
+Components should not directly import large mock arrays, and must not access any storage mechanism directly. All reads and writes go through the service/repository layer:
 
 ```text
 UI
 → service / repository layer
-→ localStorage repository
+→ in-memory cache of every table
+→ Supabase (PostgreSQL + Auth + Realtime)
 ```
 
-**MVP persistence assumption:** single Admin, single browser/device, used for live stakeholder demonstration. No concurrent multi-admin editing is required for MVP. If that changes, only the repository implementation is swapped — the service layer contract and UI stay the same.
+**Persistence:** Supabase. Data is shared — several people on several devices see the same portfolio, and a change made by one of them appears for the others without a reload.
 
-This allows MVP data source to start from:
+The repository layer stayed synchronous through this move. It reads from an in-memory cache of all nine tables, filled once at sign-in; writes update that cache immediately and go to Supabase in the background, and Supabase Realtime pushes everyone else's changes back into it. That is what allowed the database to be introduced without rewriting UI components — the promise this section made when persistence was `localStorage`.
 
-```text
-local storage
-mock JSON
-```
+The trade-offs this accepts are recorded in `docs/DECISIONS.md`: writes are optimistic (a rejected write toasts and refetches rather than blocking the UI), and the cache assumes a data set small enough to hold whole.
 
-and later move to:
-
-```text
-Supabase
-PostgreSQL
-REST API
-company backend
-```
-
-without rewriting UI components. Do not introduce Supabase, an authentication backend, or a server database for this MVP.
-
-For stakeholder demo, local persistence is acceptable.
+Schema and seed data live in `supabase/schema.sql` and `supabase/seed.sql`. Column names match the domain interfaces in `src/lib/domain/types.ts` exactly, so there is no mapping layer.
 
 ---
 
@@ -2133,10 +2641,10 @@ shadcn/ui
 Lucide Icons
 ```
 
-For MVP persistence:
+For persistence:
 
 ```text
-localStorage, wrapped by the service/repository layer (§34)
+Supabase (PostgreSQL + Auth + Realtime), wrapped by the service/repository layer (§34)
 ```
 
 Preferred architecture:
@@ -2146,20 +2654,10 @@ UI
 ↓
 Service / Repository Layer
 ↓
-Mock / Local Data
+Supabase
 ```
 
-Later:
-
-```text
-UI
-↓
-Same Service Layer
-↓
-Real Backend API
-```
-
-Do not tightly couple UI to mock data.
+Do not tightly couple UI to a particular data source. This layer has now survived one move (localStorage → Supabase) without the UI changing; keep it that way.
 
 ---
 
@@ -2293,7 +2791,7 @@ Malik
 
 ```text
 Priority: P2
-Status: Proposed
+Status: Planning
 Timeline: Nov–Feb
 Confidence: Tentative
 
@@ -2322,7 +2820,7 @@ Extend a few existing seed projects (e.g. Trade Finance) with realistic Weekly F
 * a week range that crosses a month boundary,
 * a week range that crosses a year boundary, if a seeded project's timeline spans one.
 
-Weekly Focus is additive: existing persisted demo data (already in a user's browser from before this change) must continue to load correctly even though it has no Weekly Focus rows — do not wipe or migrate existing localStorage data to backfill this field.
+Weekly Focus is additive: a project with no Weekly Focus rows must render correctly rather than being treated as incomplete data. (This originally also governed back-compat with data already in a user's browser; persistence has since moved to Supabase, where the rows simply don't exist for such a project.)
 
 ---
 
@@ -2343,7 +2841,8 @@ The MVP is considered successful when an Admin can:
 * see project phases,
 * distinguish committed vs tentative,
 * filter portfolio,
-* switch between Month View and Week View without losing active filters,
+* switch time scale without losing active filters,
+* reschedule a project by dragging or resizing its bar,
 * see what a project is focused on in a given week (Weekly Focus), without it turning into a task board,
 * see the same Weekly Focus data on Timeline, Project Detail, and Project Edit.
 
@@ -2351,7 +2850,9 @@ The MVP is considered successful when an Admin can:
 
 * create project,
 * edit project,
-* archive / un-archive a project (without deleting it, §25),
+* mark a project complete, put it on hold, cancel it, or reopen it (§10, §25),
+* archive / un-archive a project,
+* delete a project (§25),
 * view complete project context,
 * see business stakeholders,
 * see Design ownership.
@@ -2374,11 +2875,11 @@ The MVP is considered successful when an Admin can:
 
 ### Master Data
 
-* create/edit/deactivate Designers,
-* create/edit/deactivate Squads,
-* create/edit/deactivate Departments (including Department Head),
-* create/edit/deactivate Epics,
-* create/edit/deactivate Stakeholders.
+* create/edit/deactivate/delete Designers,
+* create/edit/deactivate/delete Squads,
+* create/edit/deactivate/delete Departments (including Department Head),
+* create/edit/deactivate/delete Epics,
+* create/edit/deactivate/delete Stakeholders.
 
 ### Data Consistency
 
@@ -2424,14 +2925,27 @@ Per-squad permissions
 Skill matching
 Project dependencies
 Critical path
-Drag-and-drop timeline
-Day-level timeline view (Week View is in scope — see §14.2, §8.9)
+Project progress / % complete
+Timeline baselines (planned vs actual)
 Task management inside Weekly Focus (status, assignee, subtasks, checklist, story points, sprint planning, Kanban, comments, per-task priority/workload, completion percentage)
 Resource forecasting
-Hard delete of Projects or Master Data records
-Concurrent multi-admin editing
-Supabase / backend database for MVP
-Authentication / SSO backend for MVP
+SSO
+Bahasa Indonesia translation
+Mengubah alamat email sendiri
+Two-factor authentication
+Passkeys / security keys
+Daftar active session
+Manajemen device
+Login history
+Audit log
+Upload foto profil
+Notification preferences
+Connected accounts
+Billing
+API keys
+Team / organization settings
+Undangan user dari dalam aplikasi
+UI manajemen permission
 ```
 
 Do not add these proactively.

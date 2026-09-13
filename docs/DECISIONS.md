@@ -2,11 +2,379 @@
 
 This file records important product or architecture decisions and their rationale.
 
+## One `profiles` table, not a second people model
+
+The obvious ways to give an account an identity were both wrong. Putting the
+preferences on `designers` would have meant every person in the planning data
+carrying a theme and a landing page, including the dozen who have no login.
+Building a full `users`/`members` entity would have created a second people
+model to keep in step with the first.
+
+What exists instead is one table keyed by the Supabase Auth user id, holding
+what belongs to the *account* — preferences, system role, design role — plus one
+nullable, unique `designer_id` pointing at the person record. `designers` stays
+exactly what it was: the app's people table, edited in Master Data, referenced
+by squads and assignments.
+
+The link is what the whole feature turns on. It is why the signed-in user can be
+picked as a Squad Lead without a fake "Me" row existing anywhere, and why the
+pickers needed no new data source — the user is in those lists because they are
+a designer, not because they were appended to them.
+
+## Name and job title are written to both rows, and read from the designer first
+
+`profiles` has to hold `full_name`: an account with no designer record still has
+a name. The linked `designers` row has to hold it too, because that row is what
+every planning screen renders. So saving Settings → Profile writes both, and
+`useCurrentUser` reads the designer's copy first.
+
+The alternative — one authoritative row chosen by whether a link exists — has no
+duplication at all, and was rejected for being harder to reason about at the
+call site than the staleness it avoids. The mirror is one-way (Settings →
+Designer) and lives in exactly one function, `profileRepository.saveIdentity`.
+Renaming someone in Master Data leaves `profiles.full_name` behind, which
+nothing reads while a link exists.
+
+## `system_role` is protected by a column GRANT, not by the UI
+
+RLS decides which rows a user may write; it cannot decide which columns. A
+policy of "you may update your own profile" therefore also permits
+`system_role: 'Admin'` from the browser console, and no amount of not rendering
+a control changes that.
+
+So the blanket UPDATE grant on `profiles` is revoked and only the self-service
+columns are granted back (`supabase/schema.sql`). `id`, `system_role`,
+`created_at` and `updated_at` are absent deliberately. The Profile screen shows
+the access level as a fact rather than as a disabled input — a greyed-out
+dropdown reads as "temporarily unavailable" and invites someone to go looking
+for the way to enable it.
+
+## Settings writes are awaited; every other write in the app is not
+
+`createRepository` is optimistic and returns nothing to wait on, which is right
+for planning data edited one row at a time (see "Supabase behind a synchronous
+in-memory cache"). Settings has an explicit `Save changes` button that must go
+busy and then either confirm or explain itself, and that needs a promise.
+
+`profileRepository` therefore reads from the shared cache like everything else —
+so the forms render already filled in, with no skeleton and no flash of defaults
+— but writes through `await`ed calls that only touch the cache once PostgREST
+has accepted them. Nothing appears saved that wasn't.
+
+## Dark mode ships as a class on `<html>` and no theme library
+
+`next-themes` was installed and removed from this project once already. It was
+not reinstalled for a three-value preference: every colour is a CSS variable,
+`globals.css` already carried a complete `.dark` block, and `src/` contains no
+hardcoded colour literal at all — so the entire mechanism is one class.
+
+The preference lives on the profile, which is authoritative, and is mirrored
+into `localStorage` only so a small inline script in `<body>` can apply it
+before first paint. That mirror is a guess, and a wrong one exactly once: a
+dark-mode user signing in on a new machine sees light for one paint. The
+alternative was blocking the whole app on a network round trip.
+
+Light stays the default and remains what the product is designed for.
+
+## The Timeline's week columns ignore the "week starts on" preference
+
+`project_weekly_focus.week_start_date` is constrained to Mondays in the database
+(PRD §8.9), and Weekly Focus bars are drawn Monday to Monday. Sunday-start
+columns would cut every focus band across two of them, and the drag handler
+would still snap to Monday — the preference would produce a chart that
+disagrees with itself.
+
+The preference is applied where it is both true and useful: the first column of
+every date picker, set once in the shared `DatePicker` so all of them follow.
+The timezone preference gets the Timeline instead — it drives the gantt's day
+boundaries and its Today marker, which previously read the browser's zone.
+
+## Password recovery renders outside DataProvider, via a path list rather than a route group
+
+`/forgot-password` and `/reset-password` exist for people who cannot sign in, so
+they cannot sit behind the sign-in gate. The idiomatic Next answer is a route
+group that owns `DataProvider` — which would have meant moving every existing
+route into a sibling group to get it. Two paths in a list in `AppFrame` is a
+smaller thing to understand, and to undo, than relocating thirty files.
+
+The recovery page never touches the token in the link: supabase-js exchanges it
+for a session on load, and the page asks whether a session exists. That makes
+the expired case correct for free, since an expired link produces no session.
+
+## Changing a password re-authenticates first, and finishing a reset signs you out
+
+`supabase.auth.updateUser({ password })` will change a password on the strength
+of a valid session alone, so "current password" would otherwise be decoration
+and a borrowed unlocked laptop would be enough. Settings → Security signs in
+with the current password before calling it. A failed attempt leaves the
+existing session untouched.
+
+At the end of `/reset-password` the session is deliberately closed rather than
+carried into the app: finishing at the sign-in screen proves the new password
+works, and leaves nothing open on what may be a shared machine.
+
+## Settings is in the sidebar's utility footer, and not repeated in the account menu
+
+PRD §7 already called Settings utility navigation. A gear between Timeline and
+Projects would make five workflow destinations look like six, so it sits in the
+footer strip with the account — where a collapsed sidebar still has room for it.
+
+The account menu carries `Profile` and `Sign out` only. Two routes to the same
+page a centimetre apart is a menu that has stopped meaning anything.
+
+## `(Me)` is a suffix, and lives in one helper
+
+The rule is one line long, which is exactly why it is not inlined: it is applied
+in five pickers, and five copies is how the label ends up reading "Me" in one of
+them and "(you)" in another. `personDisplayName(person, currentDesignerId)` in
+`src/lib/identity/person-display.ts` is the only place that decides.
+
+It appends rather than replaces. A squad lead recorded as "Me" is unreadable to
+the next person who opens that record, and the id stored is always the real
+designer id — there is no sentinel value and no Me row in any table.
+
+## ~~Toasts come from Sonner, pinned to light~~ (partly superseded — no theme provider is still true)
+
+`@kobra/toast` was the component originally asked for; its registry turned out
+to be paid (`@kobra/toast` pulls `@kobra/alert`, which needs a token), so the
+app uses shadcn's standard Sonner toast instead. Two deliberate departures from
+the generated component:
+
+The shadcn default reads the theme from `next-themes` and installs it as a
+dependency. This app ships no theme provider and is light-mode-first, so
+`useTheme()` would have returned nothing and Sonner's own `"system"` fallback
+would have rendered dark toasts over a light UI on any OS-dark machine. The
+theme was pinned to `"light"` and `next-themes` was uninstalled rather than kept
+as a dependency the product doesn't use.
+
+**Superseded on 2026-09-13, as predicted — it was the one line to change.**
+Toasts render into a portal outside the styled tree, so they are the one place
+that needs the resolved theme as a value rather than inheriting it through CSS.
+It now comes from the document class the theme preference sets, read through
+`useSyncExternalStore` (see "Dark mode ships as a class on `<html>`"). Still no
+`next-themes`, and still not the OS preference — which would flip toasts dark
+under a user who chose light.
+
+The generated component also applied a `cn-toast` class that nothing in
+`globals.css` defines — dropped. Colours come from the existing `--popover`,
+`--popover-foreground`, `--border` and `--radius-md` tokens, so toasts inherit
+the theme rather than carrying their own palette.
+
+One `<Toaster />` is mounted in `src/app/layout.tsx`, outside `TooltipProvider`
+and below `AppShell` — never per-page, which is what produces duplicate toasts.
+
+## Write confirmations are receipts, not undo affordances
+
+Sonner offers an `action` button and it would have been cheap to attach `Undo`
+to every delete. It isn't offered, because the repositories are synchronous
+writes with cascading removals (`removeCascade`), so "undo" would mean either
+a restore path through every repository or a snapshot layer
+neither of which the MVP needs: destructive actions are already gated by a
+confirmation dialog, and the toast's job is to say *which* record the write
+landed on. Failures stay inline where the user is working, for the same reason
+— a toast is the wrong place for something the user has to act on.
+
+## Timeline drops the `Day` scale; `Week` is the finest view the product offers
+
+The vendored gantt implements five scales and Timeline shipped all five. Four
+remain: Week / Month / Quarter / Year. A design project is scheduled in weeks
+and months — `start_date`/`end_date` are day-level precisely so a bar can be
+nudged, not so anyone plans an afternoon — and an hour axis under a four-month
+bar answers no planning question anyone has. Removing it also made the scale
+control a segmented control that fits on one line, which was the point: the
+selected scale is part of reading the chart, so it must not hide in a dropdown.
+Nothing was deleted to achieve this — the `day` scale still exists in
+`src/components/reui/gantt/`, it simply isn't offered.
+
+## Timeline's filter panel applies live; Projects' stays staged behind Apply
+
+Projects' Advanced Filters panel is deliberately staged (Reset/Apply) because
+you're changing several dimensions of a long table you can't see while the
+panel is open. Timeline is the opposite case: the panel holds *every*
+dimension, and the chart it filters is right there behind it. Staging would
+mean the canvas sat inert until you pressed Apply, which is precisely the
+feedback loop a visualization exists to give. So the Timeline popover writes
+straight through, and its footer carries `Clear all` and a `Done` that only
+closes. Two panels, two interaction models, each matching what its screen is.
+
+## Timeline bars carry commitment; health is an exception marker, not a fill
+
+Health used to colour the whole bar. In a healthy portfolio that produced a
+screen of strong green bars saying nothing, while the two states a Design Lead
+must react to — At Risk, Blocked — had to compete with it for attention. Bars
+now carry what they are actually a picture of (duration, and Committed vs
+Tentative via solid-vs-dashed fill and border), and health shows as a small dot
+on the exceptions only; On Track carries no marker. Full health stays one hover
+away in the bar tooltip, and on Overview/Projects, where health IS the subject,
+`HealthBadge` is unchanged. The now-line moved from destructive red to the
+brand accent for the same reason: on this screen red now means Blocked, and two
+meanings for one colour is one too many.
+
+## The Timeline toolbar lives inside `<Gantt>`, and the page passes its half in
+
+Today / prev / next / the scale control / zoom all read gantt context, so they
+can only render inside `<Gantt>`; search and filters own page-level state, so
+they can only be built by the page. Rather than split the toolbar into two
+visually competing bars, `PortfolioGantt` renders the whole toolbar and accepts
+the page's controls as a `toolbarStart` node. The page still builds those from
+the shared `FilterBar`, so Timeline keeps ⌘K, the chip row and the standard
+`Clear filters` action without Timeline-specific copies of any of them.
+
+## The gantt's `renderNoResources` slot is not used for Timeline's empty state
+
+It renders inside the scrolling track and centres itself against the track's
+full width, not the visible pane, so with a sticky project column the empty
+state lands half-hidden behind it. Timeline instead swaps the chart body for
+the empty state and keeps its toolbar mounted — which is the better outcome
+anyway: the filters that emptied the view stay exactly where they were, one
+click from being undone.
+
+## The Timeline Gantt is vendored from ReUI, not written here
+
+**Decision:** `src/components/reui/gantt/` holds ReUI's headless gantt (9 files, ~9,900 lines) installed verbatim via `npx shadcn@latest add https://reui.io/r/gantt.json`. It is MIT-licensed (`keenthemes/reui`), and the source for this repo's own `base-vega` style ships in that repo at `public/r/styles/base-vega/gantt*.json`, byte-identical to what the registry serves. Only the four pre-assembled `gantt-1`…`gantt-4` *blocks* are behind ReUI's license key; the engine is not, and we use none of the blocks. The single local edit is in `gantt-nav.tsx`, mapping the component's `navButtonSize: "default"` onto this app's `md` (40px) button tier. `src/components/reui/**` is excluded from ESLint — linting code we don't author only invites edits the next upgrade overwrites. Our own adapter, `src/app/timeline/_components/portfolio-gantt.tsx`, is linted normally and is the only file that knows both the domain and the gantt.
+
+**Why:** The user asked for the capability set on ReUI's Gantt page specifically. Writing an equivalent — five time scales with correct DST-weighted column geometry, pointer-accurate drag/resize with snapping, lane packing, infinite scroll, a scroll-synced resizable split pane — is several thousand lines of the kind of code that is subtly wrong for months. It also happens to be built on `@base-ui/react`, the exact primitive layer this repo already uses (not Radix), and this repo's `components.json` was already on ReUI's `base-vega` style, so it dropped in with one type error. The cost is an unlinted vendored directory and two new dependencies (`date-fns`, `@date-fns/tz`); the alternative was owning a rendering engine that isn't this product's value.
+
+Installing it overwrote four `src/components/ui/` primitives (`button`, `dropdown-menu`, `popover`, `tooltip`) — the shadcn CLI has no per-file overwrite flag — which silently discarded the 40px button scale, the transitions.dev motion tokens, and the tooltip's 80 ms intent delay. All four were restored from a pre-install copy. **Re-running the install will do this again**: back `src/components/ui/` up first, and restore everything except `calendar` and `context-menu`.
+
+## Project stores day-level dates; every month view derives its months
+
+**Decision:** `Project.start_date` / `end_date` are `"YYYY-MM-DD"`, both inclusive, and they **replaced** `start_month`/`end_month` rather than joining them. Anything that still works per month — `ProjectMonthlyTarget` rows, Person Timeline's `MonthRangeTrack`, the Projects list's timeline column, Overview — calls `monthOf()` from `src/lib/domain/dateUtils.ts` at the point of use.
+
+**Why:** Storing both would mean three writers (a Timeline drag, the Add/Edit wizard, Mark as complete) keeping two fields in agreement forever, with no way to adjudicate at read time when they disagree — if a bar is dragged to Dec 3 but `end_month` still says `2026-12`, which is true? Derivation is a `.slice(0, 7)`; a stored duplicate is a permanent invariant to defend. ISO dates also sort lexicographically, so every existing `localeCompare` sort kept working verbatim.
+
+`dateUtils.ts` is the only module allowed to construct a `Date`, and every `Date` it builds is local midnight — the gantt measures and renders with local `Date` methods, so a UTC-midnight `Date` (what `new Date("2026-09-01")` produces) would render a day early in any negative-offset zone. `weekUtils.ts` was deliberately left alone: it is UTC-anchored internally and never hands a `Date` out, so the two conventions cannot meet.
+
+## ~~Schema changes migrate localStorage in place rather than bumping the storage key~~ (superseded)
+
+**Superseded** by the move to Supabase: schema changes are now SQL migrations against a real database, and `createRepository`'s `migrate` argument is gone along with `migrateProjects`. Kept for the reasoning about preserving user-entered data, which still applies to any future migration.
+
+**Decision:** `createRepository` takes an optional third `migrate(rows)` argument, run once per page load when the key already holds data, writing only when something actually changed (return the input array to signal "nothing to do"). `projectRepository` uses it to backfill `start_date`/`end_date` from the old month fields, expanding to the full span of the months the row already named. The `dpp:v1:` key prefix stays.
+
+**Why:** The obvious alternative — bump `KEY_PREFIX` to `dpp:v2:` — is one line, and this app has accepted "existing localStorage data will not match the new shape" before (the Proposed/Done status change). But that change altered a field every project row carried; this one alters one entity. Bumping the prefix would have discarded designers, squads, departments, epics, stakeholders, assignments, monthly targets and weekly focus — none of which moved — to migrate projects, and left the v1 keys behind as dead bytes. Fifteen lines that preserve what the user typed beat one line that throws it away.
+
+Expanding to first-of-month/last-of-month is chosen so `monthOf()` round-trips to exactly the old `start_month`/`end_month`, which guarantees no `ProjectMonthlyTarget` or `ProjectWeeklyFocus` row falls out of range during the migration. Seed data is different: it gets varied, realistic days inside the same months, so the Day scale exercises real dates instead of a wall of month boundaries.
+
+## One shared `FilterBar` owns filter layout; the majority container convention won over Projects' full-bleed one
+
+**Decision:** `src/components/shared/filter-bar.tsx` is now the single owner of every list screen's filter toolbar — search box and its width, control spacing, the ⌘K focus shortcut, the "Clear filters" button, and the optional active-filter chip row. Pages supply only their own filter controls as children. Every screen renders it inside `<ContentSection bodyClassName="space-y-4">`.
+
+That container choice meant changing Projects, not the other eight. Projects had been the odd one out: a `p-0` card body with the toolbar at `px-4 py-2`, a `border-t` chip row, and the table in its own `border-t px-4 py-4` wrapper — a full-bleed, divider-separated treatment. Timeline, People, Teams, and all five Master Data screens already used the padded `space-y-4` body. Converting the eight to match Projects would have touched far more code for the same end state, so Projects lost its dividers instead. Its table wrapper was safe to drop outright because `Table` already renders its own `overflow-x-auto` container.
+
+Two follow-on details fell out of centralizing: the chip row now renders only when chips actually exist (Projects previously showed an empty bordered strip whenever a Search query alone was active), and `FilterSelect`/`FilterMultiSelect` gained `aria-label="Filter by <dimension>"` on their triggers — without it, migrating Timeline's and Stakeholders' raw `<SelectTrigger aria-label=…>` onto the shared controls would have been an accessibility regression rather than a consolidation.
+
+**Why:** Direct user report that filtering felt different from page to page. Three control stacks had grown up across separate PRD phases, and the divergence had reached wording as well as layout — three different reset-button labels, six empty-state title variants, and `All squads` doing duty for three unrelated dimensions. A shared component (rather than a documented convention) is what actually keeps them from drifting apart again, since a new screen gets the right toolbar by construction.
+
+## Filter state stays local and out of the URL, deliberately
+
+**Decision:** Unifying the filter toolbars did **not** move filter state into URL query params. Each screen keeps its own local `useState`, and filters reset when you navigate away. Projects remains the one exception, and only in one direction: it reads `designLead`, `health`, and `status` once on mount so Overview can drill into it, and never writes them back.
+
+Timeline's eight separate `useState`s were consolidated into a single `TimelineFilters` object to match the shape Projects/People/Teams already used, but that is a code-shape change, not a persistence change.
+
+**Why:** Explicitly scoped out by the user when this work was planned. Two-way URL sync is a real feature with real consequences — shareable filtered views, browser history entries per filter change, back/forward semantics to get right — and folding it into a consistency pass would have made a large behavioural change under cover of a visual one. The consolidated per-screen filters object is also what a later URL-sync change would build on, so nothing here blocks it.
+
+## Overview's "Designer Capacity" and "Upcoming Work" visualizations were not built — they conflict with the PRD, not just with taste
+
+**Decision:** Of the task's three suggested Overview visualizations, only **Project Health** (a horizontal stacked bar, `bg-status-success`/`bg-status-warning`/`bg-destructive` segments sized by `flexGrow: count`, each segment a link into `/projects?health=...`) was built. The other two were deliberately skipped:
+
+- **Designer Capacity** (Available / Healthy / Near Capacity / Overallocated) was not built at all. This isn't a style preference — it directly contradicts explicit, repeated PRD rules: §4.2 ("No false precision... allocation percentage, utilization percentage, capacity score, workload score... jumlah project tidak otomatis menentukan seseorang overloaded"), §38's explicit out-of-scope list (allocation/utilization/capacity percentage, capacity/workload scoring), and `CLAUDE.md`'s own build guardrails ("Do not implement allocation or capacity calculations," "Do not infer that project count equals workload"). Nothing in this domain model (`Designer`, `ProjectAssignment`) carries the data such a chart would need, and inventing a scoring formula to produce one would be exactly the "false precision" the PRD calls out by name.
+- **Upcoming Work mini-timeline** ("This week" / "Next 2 weeks" / "Next month") was not built because `Project` only had month-granularity `start_month`/`end_month` (`"YYYY-MM"`, no day). Bucketing into week-level windows would have required inventing a specific day within a project's start month that the data didn't actually specify — the same "false precision" problem, just applied to timing instead of workload.
+
+  **Amended:** that blocker is gone. Project now carries real `start_date`/`end_date` entered by a user, so week-level bucketing would no longer invent anything. This does **not** reinstate the widget — whether Overview needs it is a separate product question nobody has asked — it only retires the reason recorded here. The Designer Capacity decision above is untouched and still stands: it was refused on PRD grounds (§4.2 false precision, §38 out-of-scope), not on data availability, and no amount of new date precision changes that.
+
+**Why:** Per `CLAUDE.md`'s instruction precedence, the PRD outranks a feature ticket's own suggestions, and both skipped items were explicitly framed as optional/recommended ("Optional Visualization 3," "Possible visualization") rather than a directive — so following the PRD here isn't overriding an explicit instruction, it's resolving an internal conflict the ticket itself allowed for ("Do not add charts purely to make the dashboard look more visually interesting... every chart should support a specific planning decision"). Limiting Overview to the one visualization that has real, already-modeled data behind it also keeps it within the task's own "1–2 useful visualizations" ceiling.
+
+## Cross-squad support is grouped per designer and rendered by one shared component, replacing the `→ Project / Squad` shorthand everywhere it appeared
+
+**Decision:** New `SupportingProjects` (`src/components/shared/supporting-projects.tsx`) renders "Supporting: A, B" (plain project links) for one or two projects, or "Supporting N projects" with a keyboard-focusable Tooltip listing every name once a designer crosses that threshold. It replaces the `→ ProjectName / OwnerSquad` arrow notation in three places: Overview's Cross-squad Support list, and Squad Detail's Outgoing and Incoming sections. All three data sources were also regrouped from one row per (designer, project) pair to one row per designer — Overview's `CrossSquadRow` and Squad Detail's `OutgoingSupportRow`/`IncomingSupportRow` now carry a `projects: Project[]` array instead of a single `project`, so a designer supporting several cross-squad projects reads as one line instead of a repeated name.
+
+**Why:** Direct task ask — the arrow notation "may not be immediately understandable to new or infrequent users," and multiple projects for the same person should consolidate rather than repeat the name once per project. One shared component (rather than three inline copies) keeps the "≤2 inline / >2 collapses to a tooltip" threshold consistent if it's ever tuned.
+
+## Sidebar gained two labeled nav groups (Planning / Administration) and per-item counts, both reusing already-loaded repository data
+
+**Decision:** `AppShell`'s flat six-item nav is now two groups — Planning (Overview, Timeline, Projects, People, Teams) and Administration (Master Data alone) — with a small uppercase label above each (skipped while the sidebar is collapsed to icons only, where there's no room for it). Projects/People/Teams additionally show a small muted count on the right of their row: active project count, active designer count, and active squad count respectively — plain numbers, no colored pill, no "N new" notification styling. The inactive-item hover background went from `bg-foreground/5` to `bg-foreground/8` (a small, deliberate bump — still clearly subordinate to the active item's solid `bg-background` treatment). Counts are read via the same `useRepositoryList` hook every page already uses. (They were originally as stale as the last full navigation; since the move to Supabase they track the shared cache and follow every edit, including other people's.)
+
+**Why:** The nav grouping is the task's own "Operational view ≠ Configuration view" mental model applied directly in navigation, not just described in copy (paired with Master Data's new subtitle, next entry). Counts were deliberately limited to three items and to plain totals — no per-item "unassigned"/"at risk" alarm badges — matching the task's explicit "do not add counts simply because data exists" and "avoid notification-style indicators without clear meaning."
+
+## Master Data gained a one-line subtitle instead of a duplicate page heading
+
+**Decision:** `master-data/layout.tsx` now renders a short explanatory paragraph above the Designers/Squads/Departments/Epics/Stakeholders tab strip ("Reference data and organizational configuration used across the app. For day-to-day planning, use Overview, Projects, Timeline, People, or Teams instead..."). It is *not* wrapped in a second `<PageHeader>` — `AppShell`'s own header bar already titles the page "Master Data" (from the active nav item's label), so a second `<h1>Master Data</h1>` directly below it would have been a redundant, stacked heading.
+
+**Why:** Direct task ask for a subtitle clarifying Master Data's role as the administrative/configuration layer, distinct from the operational People/Teams screens that read the same underlying data. Checking the existing chrome first (rather than reusing `PageHeader` by default) avoided adding visual weight the task explicitly warned against ("without becoming visually heavier").
+
+## Overview: one stacked-bar visualization, "View all" on the two capped lists, and a spacing bump — no new dividers
+
+**Decision:** Three small, independent changes: (1) the Project Health stacked bar described above; (2) "Priority Projects" and "Upcoming Projects" — both capped subsets (top 6 / top 5) — gained a "View all N" action in their `ContentSection` header, shown only when the full count actually exceeds what's displayed, linking to `/projects?status=...` (Projects' URL-seeding was extended to parse a comma-separated `status` list, alongside the existing `designLead`/`health` params); (3) the page's outermost vertical spacing went from `space-y-6` (24px) to `space-y-8` (32px) — no new divider lines were added between sections, since every Overview section is already a full bordered `ContentSection` card (`rounded-lg border border-border`), which is already a stronger separator than a subtle divider would be.
+
+**Why:** Direct task ask for both the "View all" pattern and increased section-to-section spacing (32–40px), explicitly scoped to *not* solve it by adding more card containers — sections here were already cards, so the only real lever left was spacing, which is what changed. "View all" was limited to the two lists that are actually truncated (Team Snapshot and Cross-squad Support already show everything, or already have their own "+N more" affordance) — an unconditional link would either be dead weight or misleadingly imply hidden data that doesn't exist.
+
+## Filter bars standardized across Projects/People/Teams/Timeline — same structure, page-appropriate fields; no filter popover where there's nothing to hide
+
+**Decision:** Every primary list page now offers Search-first filtering, but the filter *set* is deliberately different per page, matching what that page's data actually supports:
+
+- **Projects** (`_components/projects-filter-bar.tsx`) stays the reference pattern, unchanged in shape: Search + quick toolbar filters + a staged "Filters" popover for less-common fields — because it has nine filter dimensions, genuinely needing progressive disclosure.
+- **People** (new `_components/people-filter-bar.tsx`): Search, Home Squad, Seniority, Status, and a new "Assignment" filter (All / Has active project / Unassigned — presence/absence of an active `ProjectAssignment` only, never a percentage or count threshold, per PRD §4.2's ban on allocation/capacity math). No "Availability/Capacity" filter, despite being suggested in the task brief — that concept doesn't exist in this product and adding it would contradict the PRD directly.
+- **Teams** (new `_components/teams-filter-bar.tsx`): Search, Staffing (derived from member count: Has designers / No designers), Lead (assigned / unassigned), Status. No Department filter — `Squad` has no `department_id` in the domain model (PRD §8.2: id/name/lead_designer_id/description/status only), so a Department filter here would require adding a field the PRD doesn't define.
+- **Timeline** keeps its existing seven direct `<Select>` filters with no popover — already the right call for a filter set with no dimension worth hiding, and now the precedent People/Teams follow (all filters shown directly, no popover, since they're both smaller than Projects' set). **Superseded (2026-09-12):** Timeline now collapses all seven into one `Filter` popover and adds Search. The reasoning above weighed the filter *set*; what it missed is what the filters sit next to — on a table, seven triggers are a row of controls above a list, but on a canvas they are seven controls competing with the thing you came to read. People and Teams are tables and keep their direct controls.
+
+All four pages show a "Clear filters" action once anything is active; People/Teams/Timeline rely on each control's own trigger label to show what's active (see next entry) rather than a separate removable-chip row — only Projects' nine-dimension set is complex enough to need that extra summary.
+
+**Why:** The task explicitly asked to standardize the *pattern*, not force identical controls ("do not force every page to have exactly the same filters... avoid adding unnecessary filters purely for visual consistency"). Building a Filters-popover for Teams' 3 fields or People's 4 would be progressive disclosure with nothing to disclose — over-engineering for its own sake. Reusing `FilterSelect`/`FilterMultiSelect`/`SearchInput` for the two new bars (rather than inventing new controls) keeps every page's filter mechanics identical even though the fields differ.
+
+## `FilterSelect`'s floating trigger keeps its category name after a value is picked; Timeline's raw `<Select>`s get the same treatment by hand
+
+**Decision:** `FilterSelect` (`src/components/shared/filter-select.tsx`) now renders `"{label}: {value}"` on its toolbar (floating-variant) trigger once a value is selected — e.g. `Department: Wholesale Banking`, not just `Wholesale Banking` — matching the format already used by the active-filter chip row. The `inline` variant (used inside the Projects Advanced Filters popover) is unchanged: it already sits under its own `<FilterField>` heading, so repeating the category name there would be redundant. Timeline's filters were plain shadcn `<Select>`s at the time and got the same "category: value" treatment directly via `SelectValue`'s render-prop children; they have since moved to `FilterSelect`'s `inline` variant inside Timeline's own Filter popover, where each control sits under its own heading and needs no prefix.
+
+**Why:** The task's core complaint — several dropdowns all reading "All" with no indication of what they filter — applies just as much to an *already-selected* value as to the unselected state: "Wholesale Banking" alone doesn't say whether that's a Department, an Epic, or an Owner Squad once several filters are active together. Since `FilterSelect` is shared by Projects' toolbar (Department) and both new People/Teams bars, fixing it once in the shared component fixes every current and future caller, rather than patching each page's copy of the same problem.
+
+## Health status is a dot + label, not a badge — one component, reused everywhere Health appears, including inside a dark Tooltip
+
+**Decision:** `HealthBadge` (`src/components/shared/health-badge.tsx`) no longer renders a filled `Badge` pill; it renders a small semantic-colored dot plus the text label (`● On Track`), matching the task's "preferred pattern for dense enterprise tables." Same component, same call sites (Overview, Projects table, Project Detail, the Projects-wizard review step) — only the internal rendering changed, so every consumer picked up the new look for free. The Timeline Gantt bar's hover Tooltip renders the same dot+label *shape* by hand (`healthSolidClassName` dot + plain text) rather than invoking `<HealthBadge>` directly, because the Tooltip's dark popup background (`bg-foreground`/`text-background`) would collide with `HealthBadge`'s light-background-tuned semantic text colors (`text-status-success` etc. have no readable contrast on a dark chip) — reusing the *pattern* here without reusing the literal component avoids a real contrast bug.
+
+**Why:** Explicit task ask for consistency across every Health-displaying surface, and for a compact, scannable treatment that "doesn't compete" with Priority/Status pills in the same row — this intentionally makes Health look different from Priority/Status (a status signal, not a category badge), which is the point, not an inconsistency to fix later.
+
+## Projects table gained a row-level `...` overflow menu (Edit / Archive); People and Teams deliberately did not
+
+**Decision:** Projects' table rows now have a trailing overflow menu (same `DropdownMenu` building block as Master Data) with "Edit" and "Archive"/"Unarchive" — both real, already-existing actions that previously required opening Project Detail first. People and Teams rows were **not** given an overflow menu: neither has a secondary action beyond "open the detail page," which the row click (and the row's own name link, independently) already covers — a menu with a single "View details" entry would be exactly the "decorative menu with one low-value option" the task explicitly said to avoid.
+
+**Why:** The task's own rule ("do not add overflow menus to rows that have no meaningful secondary actions") is a per-page judgment call, not a blanket "add a menu everywhere for consistency" — Projects clears that bar (2 real actions), People/Teams don't.
+
+## Overview's "Unassigned Projects" stat and At-Risk/Blocked "Project Health" rows drill into Projects with the filter pre-applied, via a one-time URL-param read (not a two-way sync)
+
+**Decision:** Projects gained a reusable `UNASSIGNED_DESIGN_LEAD` sentinel (`src/lib/selectors/projectSelectors.ts` — shared home since both Overview and the Projects filter bar need it, avoiding an import across another route's `_components` folder) for its Design Lead filter, representing "no Lead assigned" (distinct from any real designer id). Overview's "Unassigned Projects" stat card and the "At Risk"/"Blocked" rows in its Project Health list are now links to `/projects?designLead=unassigned` / `/projects?health=At%20Risk`, etc. `ProjectsPage` reads those two query params exactly once, via a `useState` lazy initializer, to seed its filter state — the filter bar itself never writes back to the URL, so this is a one-way deep-link entry point, not a full URL-driven filter sync (which nothing in either task asked for). Both stats/rows are only clickable when their count is `> 0`; "Active Projects," "Upcoming/Proposed," and "Designers" were deliberately left as plain (non-clickable) stats — they don't represent an actionable "something needs resolving" journey the way Unassigned/At Risk/Blocked do.
+
+**Why:** Direct task ask for the Unassigned stat, generalized only as far as the task's own examples ("At Risk Projects," "Blocked Projects") reach — "Available Designers"/"Overallocated Designers" were explicitly not built since neither concept exists in this product (PRD §4.2). A one-time query-param read was chosen over full two-way URL state because every filter bar in this app (Projects, Timeline) already keeps its filters in plain component state with no URL persistence (Timeline's own header comment even flags this as the shape to mirror "if a later phase needs deep-linking") — building a full sync just for one drill-down link would be new scope beyond what was asked.
+
+## Inline "Assign" actions: Project Design Lead gets a popover that mutates; Squad Lead/membership stays a link to Master Data
+
+**Decision:** Two new shared components replace passive "Unassigned"/"–"/"0 designers" text with an actionable state, but they resolve differently on purpose:
+
+- `AssignLeadControl` (`src/components/shared/assign-lead-control.tsx`) renders "Unassigned · Assign" and opens a searchable Popover (same trigger+search+list shape as `FilterSelect`) that writes a `ProjectAssignment` "Lead" row directly — no navigation. It reconciles the same zero-or-one-Lead / no-duplicate-designer rules the Add/Edit Project wizard already enforces on full save (§8.7), scoped to a single field. Used on Overview (Priority + Upcoming), the Projects table, and Project Detail — everywhere a Project's Design Lead already appears as editable data outside Master Data.
+- `EmptyFieldAction` (`src/components/shared/empty-field-action.tsx`) renders "No lead assigned · Assign" / "No designers · Add" as a plain link out to `/master-data/squads` or `/master-data/designers` — it never mutates. Used on Teams and Squad Detail for Squad Lead and Squad membership.
+
+**Why:** Project Design Lead has always been edited from the Project's own surfaces (the Add/Edit wizard), never Master Data, so adding a faster inline editor for it there is a scoping-consistent speed-up, not a new edit surface. Squad Lead (`Squad.lead_designer_id`) and Squad membership (`Designer.home_squad_id`) are the opposite case: the existing "People and Teams are read-only directories; all entity CRUD lives in Master Data" decision (above) means Teams/Squad Detail must never gain their own mutation UI, however lightweight — so their empty-state action can only ever be a link out, matching the pre-existing "Manage in Master Data" pattern already on Squad Detail.
+
+Two Timeline/table changes ride along with the same pass: `MonthRangeTrackRow` gained an optional `health` field so a Gantt bar's fill color reflects Project Health as a secondary signal (bar style — solid vs. dashed — still carries commitment; health is additive, and `undefined` renders the prior neutral bar), and `ProjectNameLink` (`src/components/shared/project-name-link.tsx`) clamps a project name to 2 lines with a Tooltip repeating the full name, replacing single-line truncation on Overview's Priority/Upcoming lists and the Projects table — the full name stays in the DOM for accessibility either way, the Tooltip is a convenience, not the only way to read it.
+
+## Teams' "No designers · Add" gains an inline multi-select dialog, reversing the "Squad membership stays a link to Master Data" decision above (2026-09-12)
+
+**Decision:** `EmptyFieldAction` (`src/components/shared/empty-field-action.tsx`) now accepts either `href` (plain link, unchanged) or `onClick` (new). Teams' "No designers · Add" action (`src/app/teams/page.tsx`) uses `onClick` to open a new `AssignDesignersDialog` (`src/app/teams/_components/assign-designers-dialog.tsx`) instead of linking to `/master-data/designers`. The dialog is a search + multi-select checklist (reusing `MultiSelectChecklist`, promoted from `src/app/projects/_components/` to `src/components/shared/` since it's now used outside Projects) listing every Active designer not already in the target squad, with each row noting which squad they currently belong to. Confirming calls `designerRepository.update(designerId, { home_squad_id })` once per selected designer — there is still no squad-membership-specific repository method; this is the same bulk field write the decision above already described as the only available mechanism. Squad Lead (`Squad.lead_designer_id`) is unaffected and still only a link out to Master Data.
+
+**Why:** Explicit user request, given directly as an image of the desired search/avatar-list UI and the instruction that multiple designers must be selectable in one modal rather than navigating away. This knowingly reverses the "Teams/Squad Detail must never gain their own mutation UI" rule from the decision above — that rule was itself a judgment call, not a PRD requirement, and explicit current-task instruction outranks a prior architecture decision per `CLAUDE.md`'s stated precedence order. Squad Lead was deliberately left as a link-out since the user only asked about the designers/"No designer" case. Since `Designer.home_squad_id` is a required single field (no "unassigned" pool exists in this domain model), the dialog can't offer a pool of free-floating designers — every designer already belongs to some squad, so "adding" one here always means moving them, and the dialog surfaces that explicitly (description text + confirmation copy) rather than hiding it.
+
+## Button size scale rebuilt around a 40px `md` default, reusing the existing `Button`/CVA implementation
+
+**Decision:** `buttonVariants` in `src/components/ui/button.tsx` now defines exactly three primary size tokens — `sm` (32px, `px-3`, `gap-1.5`), `md` (40px, `px-4`, `gap-2` — the new default when no `size` prop is given), `lg` (48px, `px-6`, `gap-2`, `text-base`/`leading-6`, 20px icons via `size-5`) — plus matching icon-only squares `icon`/`icon-sm`/`icon-lg` at 40/32/48px. `sm` and `md` keep the base 14px/20px type (`text-sm`, unchanged) and 16px icons (`size-4`, unchanged); only `lg` steps up type and icon size. The pre-existing `xs` (24px) and `icon-xs` (24px) tiers were left in place — they aren't part of the 3-tier spec but are still used by dense inline controls (filter-bar "Clear all", Weekly Focus row remove) that would look wrong at 32px. No new Button component or separate size implementation was introduced; only the existing `cva` `size` variant map changed.
+
+**Why:** The user supplied an explicit external sizing spec (height/padding/gap/icon-size/font-size/line-height per tier, `sm`=32/`md`=40/`lg`=48, `md` as the app-wide default) and asked for it to standardize control height across the product without altering existing colors, variants, or the component API. Before this change the CVA `size` map had a `default` (36px, used almost everywhere `size` was unset), `sm` (already 32px), and an `lg` (40px) that was never referenced anywhere in the app — so `sm` needed no height change, the unused old `lg` slot's height coincidentally matched the new `md` spec and was repurposed for it, and a genuinely new `lg` (48px) tier was added. `size="default"` and `size="lg"` had zero call sites (confirmed by repo-wide search) except one `size={collapsed ? "icon" : "default"}` in `AppShell.tsx`'s nav, updated to `"md"` — so this was a safe rename, not a breaking one. `sm` call sites (table row icon actions, filter bars/popovers, timeline toolbar, segmented sub-view toggles) were deliberately left on `sm` rather than bulk-converted to `md`, since those are the dense/compact contexts the sizing spec itself calls out as the intended use for `sm`.
+
 ## Projects "Timeline" filter is a simple current-month bucket, not a date-range picker or quarter system
 
-**Decision:** The Advanced Filters panel's Timeline field buckets a project against the current month using plain "YYYY-MM" string comparison of `start_month`/`end_month`: `Active now` (current month falls inside the range), `Upcoming` (starts later), `Past` (already ended). No quarter concept, no date-range/calendar picker, no new date library.
+**Decision:** The Advanced Filters panel's Timeline field buckets a project against today using plain ISO string comparison of `start_date`/`end_date`: `Active now` (today falls inside the range), `Upcoming` (starts later), `Past` (already ended). No quarter concept, no date-range/calendar picker.
 
-**Why:** Before this redesign there was no date-range or quarter concept anywhere in the codebase (confirmed by search) and nothing in the PRD proposed one — a full range picker would have been new product surface invented mid-UI-restructure. Given an explicit choice between (a) simple preset buckets, (b) a real From/To month-range picker, or (c) skipping the field, the user picked (a): it needs no new UI primitives, matches the existing "no date library, plain string/Date arithmetic" convention (`weekUtils.ts`), and is enough to answer "is this project live right now."
+**Amended (day-level dates):** the pivot was originally the current *month*, compared against `start_month`/`end_month`. Both sides are day-level now, so the buckets are too — a project that ended on the 3rd reads `Past` on the 12th instead of staying `Active now` until the month turned over. The clause "no new date library" no longer holds literally either: `date-fns` entered the tree with the vendored Timeline Gantt. It stays confined there, and domain code is still string-first.
+
+**Why:** Before this redesign there was no date-range or quarter concept anywhere in the codebase (confirmed by search) and nothing in the PRD proposed one — a full range picker would have been new product surface invented mid-UI-restructure. Given an explicit choice between (a) simple preset buckets, (b) a real From/To month-range picker, or (c) skipping the field, the user picked (a): it needs no new UI primitives, matched the existing "plain string/Date arithmetic" convention (`weekUtils.ts`), and is enough to answer "is this project live right now."
 
 ## Advanced Filters panel is staged (Reset/Apply); toolbar quick filters are always live
 
@@ -44,17 +412,79 @@ This file records important product or architecture decisions and their rational
 
 **Why:** An unfiltered Timeline/Overview would accumulate every completed project indefinitely, contradicting the product's "avoid clutter" principle. Splitting Archive from Status avoids overloading Status with an operational-visibility meaning it wasn't designed for.
 
-## MVP persistence: localStorage, single-admin assumption, no backend
+## ~~MVP persistence: localStorage, single-admin assumption, no backend~~ (superseded)
+
+**Superseded** by "Supabase behind a synchronous in-memory cache" below. Kept because the entry below only makes sense against it.
 
 **Decision:** MVP uses `localStorage` behind the existing service/repository layer; UI components never touch storage directly. This assumes a single Admin on a single browser/device, used for live stakeholder demos — no concurrent multi-admin editing.
 
 **Why:** This is the simplest persistence that satisfies CRUD + refresh + realistic demo data, and matches the "Admin only" access model already in the PRD. Confirmed explicitly rather than assumed, since it would be expensive to change after the fact if multiple admins turn out to need concurrent access.
 
-## No hard delete anywhere; Active/Inactive uniformly, Archive for Projects specifically
+## Supabase behind a synchronous in-memory cache, not async repositories
 
-**Decision:** Designers, Squads, Departments, Epics, and Stakeholders all use Active/Inactive and are never hard-deleted, regardless of whether they're referenced by historical projects. Projects use Archive (see above) instead of deactivation, and are also never hard-deleted.
+**Decision:** Persistence moved from `localStorage` to Supabase (Postgres + Auth + Realtime), and the repository layer **stayed synchronous**. `dataStore` holds all nine tables in memory; repositories read from it. Writes are optimistic — the cache updates in the calling tick and the row goes to Supabase in the background — and Supabase Realtime refetches a table whenever anyone changes it, so a second person's edit appears without a reload.
 
-**Why:** A uniform rule removes the need for reference-counting logic before allowing any delete anywhere in the app, and guarantees historical Project context (owner squad, epic, department, stakeholders, designers) never breaks due to a deleted master-data row.
+The alternatives considered were async repositories with SWR/react-query, and a full move to server components plus server actions. Both are more conventional and both were rejected for this change.
+
+**Why:** Every page in this app is a client component that reads data synchronously during render, through six selector modules and roughly fifty components. Making the repositories async would have rewritten all of that to introduce a database — which is precisely what the repository layer in PRD §34 existed to prevent. The cache keeps that promise: the database went in, and outside the store itself almost nothing else moved.
+
+What this trades away, deliberately:
+
+- **Writes are optimistic.** A rejected write (RLS, a constraint the UI didn't catch, a dropped connection) toasts and refetches the table rather than blocking the UI. Acceptable because every mutation here is one person editing one row of their own team's planning data — a lost write is recoverable and visible, not dangerous.
+- **The whole data set must fit in memory.** True by a wide margin at this scale — nine tables, a design department's worth of projects — and the thing to re-examine if that ever stops being true.
+- **Realtime refetches the whole changed table** rather than patching the changed row. No merge logic to get wrong, and at these row counts it costs nothing.
+
+## Every authenticated user is an Admin; the access list is Supabase's sign-up switch
+
+**Decision:** RLS grants full read/write on all nine tables to any authenticated user (PRD §6: one application role). There is no allowlist table, no roles column, and no per-user data. Access is controlled by **disabling public sign-up in the Supabase dashboard** and inviting users manually.
+
+**Why:** The PRD has exactly one role, so a roles table would model a distinction the product doesn't make. The only real question is who may become authenticated, and Supabase already has a switch for that — a table would have been a second, weaker copy of it. When Editor/Viewer arrive (PRD §39) they become per-command policies in `schema.sql`, which is where they belong; the app still won't need to know.
+
+This does mean **the dashboard switch is load-bearing**. It is called out in `supabase/schema.sql` next to the policies for that reason.
+
+## No @supabase/ssr, no proxy.ts
+
+**Decision:** Auth uses plain `@supabase/supabase-js` with the session held by the client. There is no `src/proxy.ts` (Next 16's renamed `middleware.ts`) and no cookie-based server session.
+
+**Why:** There is nothing on the server to protect. No page fetches data server-side, there are no server actions and no API routes; the four `[id]/page.tsx` files are pass-throughs that await `params`. A proxy could only have redirected unauthenticated users to a login screen the client already shows, while adding a cookie-sync layer to keep working. RLS is the actual access boundary, and it is enforced by Postgres regardless of what any redirect does.
+
+## product_owner_ids and project_admin_ids stay uuid[] columns, not join tables
+
+**Decision:** Project's two stakeholder lists are `uuid[]` columns in Postgres, not `project_product_owners` / `project_project_admins` join tables. Referential integrity for them is the app's responsibility.
+
+**Why:** Both are always written whole from the project form and only ever read with `includes` (`stakeholderSelectors.getStakeholderUsage`). Join tables would have bought enforced foreign keys at the cost of changing the `Project` interface, the form wizard, and the selectors — for two fields nothing queries *across*. The deletion guard that matters (refusing to delete a stakeholder still referenced by a project) already lives in `getStakeholderUsage` and is unaffected.
+
+## Business rules that lived in UI code are now database constraints as well
+
+**Decision:** `UNIQUE (project_id, designer_id)`, at most one `Lead` per project (a partial unique index), `UNIQUE (project_id, month)` on monthly targets, and a check that a weekly-focus `week_start_date` is a Monday are all enforced in Postgres. The UI still validates first.
+
+**Why:** These were always rules; they were just unenforceable when the store was a JSON blob. The UI keeps validating so the user gets a specific message instead of a constraint-violation toast — the database is the backstop that makes the rule true of the data, not the primary messenger.
+
+## Active/Inactive is the reversible lifecycle action everywhere; Archive is Projects' equivalent — both distinct from Delete
+
+**Decision:** Designers, Squads, Departments, Epics, and Stakeholders all use Active/Inactive to retire a record without losing it; Projects use Archive (see above) for the same purpose. Neither ever deletes anything — that's now a separate, explicitly guarded capability, see the next entry for why and how it was added.
+
+**Why:** A record connected to historical Projects needs to keep rendering there even once it's no longer current — Active/Inactive and Archive both exist so retiring something day-to-day never has to mean deleting it.
+
+## Hard delete was reversed, but only when nothing still references the record — guarded, not blanket-disallowed
+
+**Decision:** Every Master Data entity (Designers, Squads, Departments, Epics, Stakeholders) and Project now support a real, permanent Delete — explicitly requested, reversing this file's own earlier "no hard delete anywhere" rule. The reversal is guarded rather than unconditional: each Master Data page computes live usage (e.g. `getDesignerUsage`, `getSquadUsage`, one small selector per entity) before showing the confirm dialog, and Delete is refused with a message naming what's still using it whenever any count is non-zero. Project has no equivalent guard — nothing else in this schema references a Project by id — but deleting one cascades through its own Project Assignment/Monthly Target/Weekly Focus rows first, since those exist only in relation to it (`projectRepository.removeCascade`).
+
+Usage counts intentionally ignore the referencing record's own status/archive state — an archived, Completed project still counts against deleting its Owner Squad, since that project's detail page would otherwise break.
+
+**Why:** The original rule's rationale — historical Project context must never break because a referenced master-data row vanished — is exactly what the guard preserves; only the "never, under any circumstance" part was reversed. A user who wants to delete a genuinely-unused Designer or a duplicate Epic created by mistake now can, without reopening the risk the original rule existed to prevent. Two new shared components carry this everywhere it's needed: `ConfirmDialog` (plain yes/no) and `DeleteEntityDialog` (the blocked-vs-confirm branching), both built on the existing `Dialog` primitives rather than a new base component — this repo had no confirm-before-destructive-action pattern anywhere before (Archive/Deactivate fired immediately), and building a near-duplicate `AlertDialog` wrapper alongside `Dialog` was rejected as exactly the kind of redundant design-system component CLAUDE.md warns against.
+
+## `Delete anyway` exists for Designer and Stakeholder only — the other three master-data entities cannot have it
+
+**Decision:** The usage guard described in the previous entry can now be overridden, but only for Designer and Stakeholder. Their delete dialog keeps listing what still references the record, then offers a destructive `Delete anyway` that detaches those references automatically: a designer's Project Assignment rows are deleted and any squad they led is left leaderless; a stakeholder is stripped from every project's `product_owner_ids`, `project_admin_ids` and `department_head_id` snapshot, and any department they headed is left headless.
+
+Squad, Department and Epic keep the hard block. This is not caution — it is that the option cannot be built honestly for them. `designers.home_squad_id`, `projects.owner_squad_id`, `projects.epic_id` and `projects.department_id` are all `NOT NULL`: there is no "detached" state for a project without an epic, or a designer without a home squad. "Delete anyway" there would mean deleting the projects too, which is not what anyone means by deleting an epic. The honest version is a reassignment flow ("move these four projects to which epic?"), which is a different feature; until it exists, Inactive is the answer.
+
+**Why:** Detaching a designer from their projects by hand — open each project, remove them, then delete — is busywork the app can do correctly and atomically, and it was the actual friction reported. The counter-argument is real and was raised before building: force-deleting a designer discards the record of who designed those projects, which is exactly what the guard existed to protect. It is offered anyway because the user asked for it with that consequence stated, and because the dialog now spells the consequence out at the moment of decision rather than burying it. `Inactive` remains the non-destructive path and is still the right one for "this person has left".
+
+**Follow-on schema change:** `project_assignments.designer_id` moved from `RESTRICT` to `ON DELETE CASCADE` (`supabase/migrations/001_designer_assignment_cascade.sql`). Not cosmetic — the app's writes are optimistic and unordered, so a client-side "delete the assignments, then delete the designer" sequence can have the designer's DELETE overtake the others and be rejected by the foreign key. Letting Postgres own the cascade makes it one request and one transaction. The cost is that the database no longer independently refuses a designer delete that has assignments; that guard now lives only in `getDesignerUsage` and the dialog. Squad, Department and Epic keep their `RESTRICT` keys, which is what makes their hard block real rather than merely enforced by UI code.
+
+**Also changed:** `projects.department_head_id` was documented as a snapshot that "must survive the stakeholder row being deleted". Force-deleting that stakeholder now clears it. An id pointing at a row that no longer exists is a dangling pointer, not history — it resolves to nothing on screen either way, and the name it was meant to preserve is gone with the row.
 
 ## ProjectAssignment and ProjectMonthlyTarget support real removal, distinct from the no-hard-delete rule above
 
@@ -80,15 +510,19 @@ This file records important product or architecture decisions and their rational
 
 **Why:** PRD §14.5 names these three columns but doesn't pin down which project statuses count as "Active" for a person or whether archived projects should be excluded; left ambiguous, People's numbers could silently disagree with Overview's. Anchoring "Active" to the same predicate as Overview, and excluding archived everywhere, keeps every screen's counts mutually consistent by construction.
 
-## Timeline Week View is a read-mostly planning view, not a second task system
+## Weekly Focus is a note, not a second task system
+
+**Amended (Timeline Gantt):** the heading used to read "Timeline Week View is a **read-mostly** planning view". Weekly Focus bars can now be dragged to another week on the Timeline, so "read-mostly" no longer describes it. The anti-scope list below is unaffected and **remains binding**: moving a note to a different week adds no status, assignee, ordering, or completion field, and a focus bar deliberately cannot be resized — there is no field in which to store a multi-week focus.
 
 **Decision:** Project Weekly Focus (`ProjectWeeklyFocus`: `id, project_id, week_start_date, title, description?`) is a new, narrowly-scoped entity that only records short "what is this project focused on this week" notes. It has no status, assignee, ordering, or completion field, and it does not carry a Designer reference — "who" is still 100% derived from Project Assignment (§8.7), exactly like Design Lead. `week_start_date` is always the Monday that starts the ISO week; this project has no other established week-start convention, so Monday was chosen as the plain, unambiguous default rather than inventing a configurable one. Like `ProjectAssignment`/`ProjectMonthlyTarget`, `ProjectWeeklyFocus` uses `createRemovableRepository` (real `remove()`), for the same reason: Edit Project must be able to diff a desired set of weekly items against what was loaded and remove the ones no longer wanted, not just soft-hide them.
 
 **Why:** The user's request was explicit and detailed about the anti-scope list (no task status/assignee/subtasks/checklist/story points/sprint planning/Kanban/comments/per-item priority/workload/completion) — this is a direct, current-task PRD amendment (§8.9, §38), not a judgment call, so the entity is modeled to make those things structurally impossible to add later by accident (there's no field to hang them on) rather than merely discouraged in prose.
 
-## Timeline Week View lives only on the portfolio Timeline; Person Timeline stays Month-only
+## Finer timeline scales live only on the portfolio Timeline; Person Timeline stays Month-only
 
-**Decision:** The Month/Week toggle (§14.2) applies only to the main Timeline page. Person Timeline (§14.6) — and the shared `MonthRangeTrack` component it uses — keeps Month-only granularity; it does not gain a Week View.
+**Decision:** The time-scale switcher (§14.2) applies only to the main Timeline page. Person Timeline (§14.6) — and the shared `MonthRangeTrack` component it uses — keeps Month-only granularity.
+
+**Still holds after day-level dates.** Project now stores `start_date`/`end_date`, but Person Timeline derives its months with `monthOf()` at the point of use, so `MonthRangeTrack` kept its month-string API unchanged and day-level precision never leaks into a view whose job is overlap, not scheduling. `MonthRangeTrack` survives the Gantt rewrite for exactly this reason, even though `WeekGridTrack` was deleted.
 
 **Why:** The user's request scoped Week View to "the more detailed operational planning view" for "what each Project is focusing on," which is a portfolio/project-level question. Person Timeline's job is a different question — visualizing one designer's overlap across multiple projects — which reads better at month scale and wasn't part of the request. Extending it would have been scope invention beyond what was asked.
 
@@ -134,14 +568,46 @@ Verified after the fact: `tsc --noEmit`, `eslint`, and `next build` are all clea
 
 **Why:** Timeline (§14.2) and Person Timeline (§14.6) are the same visualization pattern applied to two different row sets (all projects vs. one designer's assignments) and must stay visually identical (committed/tentative treatment, current-month highlight, phase labels) without hand-syncing two implementations. A future third timeline-shaped view (e.g. a Squad Timeline) should reuse this component rather than reimplement the month grid.
 
-## Motion is tokenized on the transitions.dev scale, with three easing names deliberately left to Tailwind
+## Motion is tokenized on the transitions.dev scale, minus five easings — three left to Tailwind, two dropped as off-direction
 
-**Decision:** Installed the `transitions-dev` + `transitions-polish` skills (from `github.com/Jakubantalik/transitions.dev`) into `.claude/skills/`, and applied their motion-token scale to `src/app/globals.css` as a plain `:root` block: `--duration-*` (7), `--ease-smooth-out` / `--ease-bounce` / `--ease-bounce-strong`, `--distance-*` (5), `--scale-*` (4), `--blur-*` (3). Every overlay surface now references those tokens instead of literals — Dialog, DropdownMenu, Select and Tooltip use `data-open:duration-(--duration-fast)` / `data-closed:duration-(--duration-quick)`, `ease-(--ease-smooth-out)`, and a per-surface pre-scale (`--scale-large` modal, `--scale-medium` dropdown open, `--scale-tiny` dropdown close, `--scale-small` tooltip) in place of a blanket `duration-100` + `zoom-in-95`. A global `prefers-reduced-motion: reduce` guard was added; the app previously had none. `TooltipProvider`'s `delay` default moved from `0` to `80` (`--duration-micro`) as an intent gate.
+**Decision:** Installed the `transitions-dev` + `transitions-polish` skills (from `github.com/Jakubantalik/transitions.dev`) into `.claude/skills/`, and applied their motion-token scale to `src/app/globals.css` as a plain `:root` block: `--duration-*` (7), `--ease-smooth-out`, `--distance-*` (5), `--scale-*` (4), `--blur-*` (3). Every overlay surface now references those tokens instead of literals — Dialog, DropdownMenu, Select and Tooltip use `data-open:duration-(--duration-fast)` / `data-closed:duration-(--duration-quick)`, `ease-(--ease-smooth-out)`, and a per-surface pre-scale (`--scale-large` modal, `--scale-medium` dropdown open, `--scale-tiny` dropdown close, `--scale-small` tooltip) in place of a blanket `duration-100` + `zoom-in-95`. A global `prefers-reduced-motion: reduce` guard was added; the app previously had none. `TooltipProvider`'s `delay` default moved from `0` to `80` (`--duration-micro`) as an intent gate.
 
 The skill's `--ease-out`, `--ease-in-out` and `--ease-linear` tokens were **deliberately not installed**. Tailwind v4 already defines those exact custom-property names in its own default theme (`node_modules/tailwindcss/theme.css:434-436`), so redefining them in `:root` would silently repoint every `ease-out` / `ease-in-out` utility app-wide. Those three usages use Tailwind's native `ease-*` utilities instead — hence `ease-out` (not a token) on the tooltip. Any future token added from this scale must be checked against Tailwind's theme namespace the same way.
+
+The scale's `--ease-bounce` and `--ease-bounce-strong` were later **removed**. They were installed with the rest of the scale but never referenced by anything, and overshoot easing contradicts the restrained, enterprise motion direction the PRD sets — which `CLAUDE.md` says wins over any installed skill's defaults. A token nothing uses, in a style the product has decided against, is a trap rather than a vocabulary: it invites a future change to reach for motion this app doesn't want. Impeccable's detector flags both values independently, so leaving them would have meant carrying a standing suppression for tokens with no callers. Re-adding a line is trivial if a genuine need for overshoot ever appears.
 
 **Why:** Motion values were previously ad hoc shadcn defaults with no shared vocabulary and no open/close asymmetry — a modal opened and closed in the same 100ms. The token scale gives motion one source of truth the way `--status-*` already does for color, and encodes the rule that closes should be quicker than opens (250ms open → 150ms close). Per `CLAUDE.md`'s precedence list the PRD's enterprise / calm / restrained direction still wins over the skills: no new decorative transitions were added, only existing motion was tuned onto the scale.
 
 **Verified:** `next build` clean, and the compiled CSS confirms the `duration-(--var)` / `ease-(--var)` / `zoom-in-(--var)` utilities resolve to real declarations under both `[data-state=open]` and `[data-open]` selectors.
 
 **Known follow-up, not applied:** `transition-all` remains on `button.tsx`, `badge.tsx` and `switch.tsx`. The skill flags it (unrelated property changes animate for free), but enumerating the exact property list on the app's most-used component risks silent hover/focus regressions, so it was left for a deliberate pass.
+
+## "Proposed" was retired rather than kept alongside the new Completed/Cancelled lifecycle
+
+**Decision:** The task's requested lifecycle (`Planning → In Progress → On Hold/Completed/Cancelled`) does not mention Proposed at all, and rather than bolting it on as a 6th status, it was removed: every project now starts in Planning. This took Overview's "Upcoming / Proposed" stat tile and "Upcoming Projects" list out with it, since both existed only to report projects in that status — see `docs/CHANGELOG.md`. `getProposedProjects()` was deleted from `projectSelectors.ts` rather than left dead.
+
+**Why:** Explicitly confirmed with the user when planning this change, over the alternative of keeping Proposed as a 6th status purely to avoid touching Overview. Carrying a status the new lifecycle spec never asked for, just to minimize the diff, would have been the kind of scope hedge that leaves two competing "what does upcoming work mean" answers in the product.
+
+## Completion's "allocations after this date" question is answered against Project.end_date, not a new ProjectAssignment field
+
+**Decision:** `ProjectAssignment` has exactly three fields (`project_id`, `designer_id`, `project_role`) — no date range; an assignment spans a project's entire `start_date`–`end_date`. The Mark-as-complete dialog's warning ("N designers still have allocations after this date") and its "keep as historical" vs "end allocations on completion date" choice are both implemented purely in terms of the project's own `end_date`: the warning shows when `end_date` falls after the completion date AND at least one assignment exists; "end allocations" sets `end_date` to the completion date, "keep as historical" leaves it unchanged. (Day-level dates fixed a small lie here: the button has always said "on completion date" while truncating to the completion month.) Neither choice writes to `ProjectAssignment` — there is nothing on that row to write to.
+
+**Why:** Confirmed with the user rather than assumed, since the literal task wording ("2 designers still have allocations after Sep 12") reads as if each assignment carried its own end date. Adding one would have been a real schema change with knock-on UI everywhere an assignment is shown, and edges uncomfortably close to the allocation/capacity-percentage calculations PRD §4.2/§38/§42 explicitly ban — a single user-entered completion date compared against the project's own already-modeled `end_date` answers the same product question without inventing new precision the data was never designed to support.
+
+## Master Data's row-level "Delete" and Project Detail's lifecycle actions reuse the existing `Dialog`, not a new `AlertDialog` primitive
+
+**Decision:** `ConfirmDialog` and `DeleteEntityDialog` (`src/components/shared/`) are both thin compositions of the existing `components/ui/dialog.tsx` — `DialogContent showCloseButton={false}` plus a `DialogFooter` with the two buttons — not a new `alert-dialog.tsx` base primitive wrapping `@base-ui/react/alert-dialog`, even though that dependency is already installed and a shadcn-style wrapper would have been a natural-looking addition. Mark-as-complete (the one flow with real form fields — a date input plus a conditional radio choice) stays a fully bespoke `Dialog`, matching the precedent already set by Timeline's week-detail popup.
+
+**Why:** CLAUDE.md's explicit constraint: "Do not create duplicate Button, Badge, Dialog, Dropdown, Avatar, Tooltip, or form components." An `AlertDialog` wrapper would have been visually and behaviorally near-identical to `Dialog` (same popup chrome, same footer shape), differing mainly in default close-button/backdrop behavior — exactly the kind of near-duplicate primitive the rule is aimed at. Composing the two new flows on top of `Dialog` gets the same result (a confirm-before-you-act pattern this app never had) without adding a second Dialog-shaped component to the design system.
+
+## Day-level dates are collected through one shared `DatePicker`, not `<input type="date">`
+
+**Decision:** `src/components/shared/date-picker.tsx` is now the single control for every day-level date the app collects — Add/Edit Project's Start Date and End Date (§22) and Mark-as-complete's Completion date. It composes the existing `ui/calendar.tsx` (react-day-picker) inside the existing `ui/popover.tsx` behind an outline-button trigger, and stays string-in/string-out on the same `"YYYY-MM-DD"` contract the native input had, so no caller's state or validation changed. `captionLayout="dropdown"` with an explicit `startMonth`/`endMonth` window (current year −3 to +6, widened to always contain the current selection) replaces the native widget's one-month-at-a-time stepping. An optional `min`/`max` bound renders out-of-range days disabled — used for End Date, which cannot precede Start Date.
+
+No new dependency and no new primitive: `react-day-picker`, `ui/calendar.tsx` and `ui/popover.tsx` were all already installed, with Calendar previously used in exactly one place (the Gantt's "go to date" nav).
+
+**Why:** `<input type="date">` renders a different, OS-supplied widget in every browser — it ignores the app's theme, typography, radii and motion tokens entirely, so the three date fields were the only controls in the product that didn't look like the product. The dropdown month/year navigation matters specifically here: this is a planner whose projects routinely run a year or more out, and the native control made reaching those months a long click-through. Per `CLAUDE.md`'s "prefer existing reusable components over creating duplicates", this is a composition of components already in the repo rather than a new base primitive.
+
+**Implementation note:** the `min`/`max` bounds compile to an **array** of matchers (`[{ before }, { after }]`), never a single `{ before, after }` object — the combined form means "days *between* the two" in react-day-picker, which is the exact inverse of a min/max bound.
+
+**Verified:** `tsc --noEmit` and `next build` clean; no `type="date"` remains in `src/`.

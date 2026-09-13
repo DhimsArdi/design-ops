@@ -4,7 +4,6 @@
 // in globals.css (--primary for the "active" family, --status-warning,
 // --status-success) rather than a hardcoded Tailwind color scale, so a
 // future theme change only ever touches that one file (docs/DECISIONS.md).
-// Proposed is the one quiet bookend state, left on Badge's neutral "outline".
 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "cn"
@@ -13,11 +12,14 @@ import type { ProjectStatus } from "@/lib/domain/enums"
 // Planning and In Progress are one "active / in-motion" family (both derived
 // from --primary) — Planning soft/lighter, In Progress strong/solid — so
 // they read as related but stay visually distinguishable at a glance.
-const STATUS_CLASSNAME: Partial<Record<ProjectStatus, string>> = {
+// Every status has an explicit entry (no implicit outline fallback) since
+// the lifecycle is a closed set of 5 (docs/PRD.MD §10).
+const STATUS_CLASSNAME: Record<ProjectStatus, string> = {
   Planning: "border-transparent bg-primary/10 text-primary",
   "In Progress": "border-transparent bg-primary text-primary-foreground",
   "On Hold": "border-transparent bg-status-warning/10 text-status-warning",
-  Done: "border-transparent bg-status-success/10 text-status-success",
+  Completed: "border-transparent bg-status-success/10 text-status-success",
+  Cancelled: "border-transparent bg-muted text-muted-foreground",
 }
 
 interface StatusBadgeProps {

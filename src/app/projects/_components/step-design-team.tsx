@@ -9,14 +9,11 @@
 
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { MultiSelectChecklist } from "./multi-select-checklist"
+import { MultiSelectChecklist } from "@/components/shared/multi-select-checklist"
+import { PersonAvatar } from "@/components/shared/person-avatar"
+import { PersonSelect } from "@/components/shared/person-select"
+import { useCurrentDesignerId } from "@/lib/identity/current-user"
+import { personDisplayName } from "@/lib/identity/person-display"
 import { activeOrSelected, byName } from "./project-form-types"
 import type { Designer, Squad } from "@/lib/domain/types"
 
@@ -39,6 +36,9 @@ function StepDesignTeam({
   designers,
   squads,
 }: StepDesignTeamProps) {
+  // Both fields here are people pickers, so both show the signed-in user as
+  // "(Me)" once their account is linked to a designer record (PRD §14.11).
+  const currentDesignerId = useCurrentDesignerId()
   const squadsById = new Map(squads.map((squad) => [squad.id, squad]))
   const selectedIds = leadDesignerId ? [leadDesignerId, ...supportDesignerIds] : supportDesignerIds
   const designerOptions = activeOrSelected(designers, selectedIds).sort(byName)
@@ -50,7 +50,12 @@ function StepDesignTeam({
       const isCrossSquad = ownerSquadId !== "" && designer.home_squad_id !== ownerSquadId
       return {
         id: designer.id,
-        label: designer.name,
+        label: (
+          <span className="flex items-center gap-2">
+            <PersonAvatar person={designer} size="sm" />
+            {personDisplayName(designer, currentDesignerId)}
+          </span>
+        ),
         description: (
           <span className="flex flex-wrap items-center gap-1.5">
             <span>{designer.job_title}</span>
@@ -70,24 +75,14 @@ function StepDesignTeam({
     <div className="space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="project-design-lead">Project Design Lead</Label>
-        <Select value={leadDesignerId} onValueChange={(designerId) => onLeadChange(designerId)}>
-          <SelectTrigger id="project-design-lead" className="w-full">
-            <SelectValue placeholder="Unassigned">
-              {(current: string | null) =>
-                current ? (designerOptions.find((d) => d.id === current)?.name ?? "Unassigned") : "Unassigned"
-              }
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={null}>Unassigned</SelectItem>
-            {designerOptions.map((designer) => (
-              <SelectItem key={designer.id} value={designer.id}>
-                {designer.name}
-                {designer.status === "Inactive" ? " (Inactive)" : ""}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <PersonSelect
+          id="project-design-lead"
+          value={leadDesignerId}
+          onChange={onLeadChange}
+          people={designerOptions}
+          currentDesignerId={currentDesignerId}
+          emptyOption="Unassigned"
+        />
         <p className="text-xs text-muted-foreground">
           Leaving this empty is valid: the project shows as Unassigned until a Lead is set.
         </p>

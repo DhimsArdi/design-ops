@@ -4,13 +4,9 @@
 // the selectors layer (see selectors/projectSelectors.ts), not here.
 
 import { createRemovableRepository } from "./createRepository";
-import { seedProjectAssignments } from "@/lib/seed/seedData";
 import type { ProjectAssignment } from "@/lib/domain/types";
 
-const repo = createRemovableRepository<ProjectAssignment>(
-  "projectAssignments",
-  seedProjectAssignments,
-);
+const repo = createRemovableRepository<ProjectAssignment>("project_assignments");
 
 export const { getAll, getById, create, update } = repo;
 

@@ -110,9 +110,20 @@ function FilterSelect({
     </>
   )
 
+  // Once a value is picked, the floating (toolbar) trigger keeps showing its
+  // category name ("Department: Wholesale Banking", not just "Wholesale
+  // Banking") so several active filters stay unambiguous at a glance (task
+  // ask: dropdown filters should communicate their category before and
+  // after interaction). The inline variant skips the prefix — it always sits
+  // under its own `<FilterField>` heading inside the Advanced Filters panel,
+  // so repeating the category name there would just be noise.
   const triggerLabel = (
     <span className="truncate">
-      {isActive ? (selectedOption?.label ?? label) : (triggerPlaceholder ?? allLabel)}
+      {isActive
+        ? variant === "inline"
+          ? (selectedOption?.label ?? label)
+          : `${label}: ${selectedOption?.label ?? label}`
+        : (triggerPlaceholder ?? allLabel)}
     </span>
   )
 
@@ -145,6 +156,7 @@ function FilterSelect({
           <Button
             variant="outline"
             size="sm"
+            aria-label={`Filter by ${label.toLowerCase()}`}
             className={cn("max-w-48 justify-between", isActive ? "text-foreground" : "text-muted-foreground", className)}
           />
         }

@@ -13,6 +13,13 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     ".claude/**",
+    // Vendored third-party component, installed verbatim from the ReUI
+    // registry (MIT) and re-installable with `npx shadcn add`. It uses
+    // ref-reads during render and other patterns this config rejects on
+    // purpose; linting code we don't author would only invite edits that the
+    // next upgrade overwrites. Our own adapter around it, in
+    // src/app/timeline/_components/, is linted normally.
+    "src/components/reui/**",
   ]),
 ]);
 

@@ -51,6 +51,13 @@
 }
 
 :root {
+  /* Declared here rather than set as an inline style by the theme script: the
+     script would be writing an attribute on an element React also renders,
+     which is a hydration mismatch on every load (src/lib/theme/theme.ts). This
+     is what makes scrollbars, form controls and the canvas behind the page
+     follow the theme. */
+  color-scheme: light;
+
   /* Shared status-color tokens (docs/DECISIONS.md) — every status/health
      badge reads from these instead of hardcoding a Tailwind color scale, so
      a future theme/preset change only ever touches this file. */
@@ -91,6 +98,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --status-warning: #fbbf24;
   --status-success: #34d399;
   --background: oklch(0.141 0.005 285.823);
@@ -140,8 +148,9 @@
   --duration-very-slow: 500ms; /* emphasis moments, badge appear, success check */
 
   --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1); /* open/close, slide, resize */
-  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1); /* badge pop open */
-  --ease-bounce-strong: cubic-bezier(0.34, 3.85, 0.64, 1); /* bouncy hover-out */
+  /* The scale's --ease-bounce / --ease-bounce-strong are deliberately absent:
+     nothing used them, and overshoot contradicts this product's restrained
+     motion direction. See docs/DECISIONS.md. */
 
   --distance-micro: 4px; /* text swap */
   --distance-small: 6px; /* error shake (small segment) */

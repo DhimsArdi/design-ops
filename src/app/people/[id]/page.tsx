@@ -1,6 +1,6 @@
 // Person Detail (PRD §14.6). Thin server wrapper only — params are async per
 // the App Router (Next 16), the repository layer is browser-only
-// (localStorage), so all data reading and rendering lives in the client
+// (the Supabase cache), so all data reading and rendering lives in the client
 // component below (same split as app/projects/[id]/page.tsx).
 
 import { PersonDetailView } from "./_components/person-detail-view"

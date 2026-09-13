@@ -17,24 +17,28 @@
 // render time — no invented numbers, no decorative charts (PRD explicitly:
 // "Tidak perlu pie chart besar", "Avoid oversized project cards").
 //
-// Reads use the one-time-bootstrap-read pattern already established by
-// app/projects/[id]/_components/project-detail-view.tsx: this page needs one
-// consistent snapshot assembled from many repositories at once, not a
-// reactive single-list subscription, and starting from `undefined` avoids an
-// SSR/client hydration mismatch (localStorage doesn't exist on the server).
+// Reads follow the same pattern as app/projects/[id]/_components/
+// project-detail-view.tsx: this page needs one consistent snapshot assembled
+// from many repositories at once, so it subscribes to the whole store rather
+// than to a single repository's list. Starting from `undefined` avoids an
+// SSR/client hydration mismatch (the cache is browser-only).
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
-import { FolderKanban, Plus } from "lucide-react"
+import { ChevronRight, FolderKanban, Plus } from "lucide-react"
 
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
 import { EmptyState } from "@/components/shared/empty-state"
 import { PriorityBadge } from "@/components/shared/priority-badge"
-import { HealthBadge } from "@/components/shared/health-badge"
+import { HealthBadge, healthSolidClassName } from "@/components/shared/health-badge"
 import { PersonAvatar } from "@/components/shared/person-avatar"
+import { ProjectNameLink } from "@/components/shared/project-name-link"
+import { AssignLeadControl } from "@/components/shared/assign-lead-control"
+import { SupportingProjects } from "@/components/shared/supporting-projects"
 import { Button } from "@/components/ui/button"
 
+import { subscribe } from "@/lib/store/dataStore"
 import * as projectRepository from "@/lib/repositories/projectRepository"
 import * as designerRepository from "@/lib/repositories/designerRepository"
 import * as squadRepository from "@/lib/repositories/squadRepository"
@@ -42,12 +46,14 @@ import {
   getActiveProjects,
   getProjectAssignments,
   getProjectLead,
-  getProposedProjects,
   getUnassignedProjects,
   isCrossSquadAssignment,
+  isTerminalStatus,
+  UNASSIGNED_DESIGN_LEAD,
 } from "@/lib/selectors/projectSelectors"
 import { getSquadLead, getSquadMembers } from "@/lib/selectors/squadSelectors"
 import { PRIORITIES, PROJECT_HEALTHS } from "@/lib/domain/enums"
+import { monthOf } from "@/lib/domain/dateUtils"
 import type { Designer, Project, Squad } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
 
@@ -59,17 +65,12 @@ function formatMonth(month: string): string {
   return MONTH_FORMATTER.format(new Date(year, monthIndex - 1, 1))
 }
 
+/** Overview summarizes at month granularity; the day-level dates stay on Timeline and Project Detail. */
 function formatRange(project: Project): string {
-  return `${formatMonth(project.start_month)} – ${formatMonth(project.end_month)}`
+  return `${formatMonth(monthOf(project.start_date))} – ${formatMonth(monthOf(project.end_date))}`
 }
 
 interface PriorityRow {
-  project: Project
-  squad: Squad | undefined
-  lead: Designer | undefined
-}
-
-interface UpcomingRow {
   project: Project
   squad: Squad | undefined
   lead: Designer | undefined
@@ -82,29 +83,27 @@ interface TeamRow {
 }
 
 interface CrossSquadRow {
-  key: string
   designer: Designer
   homeSquad: Squad | undefined
-  project: Project
-  ownerSquad: Squad | undefined
+  /** Every non-archived, non-Done project this designer cross-squad supports — grouped per designer rather than one row per (project, designer) pair. */
+  projects: Project[]
 }
 
 interface OverviewData {
   activeCount: number
-  proposedCount: number
   activeDesignerCount: number
   unassignedCount: number
   priorityRows: PriorityRow[]
-  upcomingRows: UpcomingRow[]
   healthCounts: Record<(typeof PROJECT_HEALTHS)[number], number>
   teamRows: TeamRow[]
   crossSquadRows: CrossSquadRow[]
   crossSquadTotal: number
   hasAnyProjects: boolean
+  /** Candidates for the inline "Assign" Design Lead control (PRD-adjacent UI ask). */
+  designers: Designer[]
 }
 
 const PRIORITY_LIST_CAP = 6
-const UPCOMING_LIST_CAP = 5
 const CROSS_SQUAD_CAP = 6
 
 function loadOverviewData(): OverviewData {
@@ -114,15 +113,14 @@ function loadOverviewData(): OverviewData {
   const liveProjects = allProjects.filter((project) => !project.is_archived)
 
   const activeProjects = getActiveProjects().filter((project) => !project.is_archived)
-  const proposedProjects = getProposedProjects().filter((project) => !project.is_archived)
   const unassignedProjects = getUnassignedProjects().filter(
-    (project) => !project.is_archived && project.status !== "Done"
+    (project) => !project.is_archived && !isTerminalStatus(project.status)
   )
 
   const priorityRows: PriorityRow[] = [...activeProjects]
     .sort((a, b) => {
       const priorityDiff = PRIORITIES.indexOf(a.priority) - PRIORITIES.indexOf(b.priority)
-      return priorityDiff !== 0 ? priorityDiff : a.start_month.localeCompare(b.start_month)
+      return priorityDiff !== 0 ? priorityDiff : a.start_date.localeCompare(b.start_date)
     })
     .slice(0, PRIORITY_LIST_CAP)
     .map((project) => ({
@@ -131,16 +129,7 @@ function loadOverviewData(): OverviewData {
       lead: getProjectLead(project.id),
     }))
 
-  const upcomingRows: UpcomingRow[] = [...proposedProjects]
-    .sort((a, b) => a.start_month.localeCompare(b.start_month))
-    .slice(0, UPCOMING_LIST_CAP)
-    .map((project) => ({
-      project,
-      squad: squadsById.get(project.owner_squad_id),
-      lead: getProjectLead(project.id),
-    }))
-
-  const healthEligible = liveProjects.filter((project) => project.status !== "Done")
+  const healthEligible = liveProjects.filter((project) => !isTerminalStatus(project.status))
   const healthCounts = Object.fromEntries(
     PROJECT_HEALTHS.map((health) => [
       health,
@@ -158,40 +147,41 @@ function loadOverviewData(): OverviewData {
     }))
     .sort((a, b) => a.squad.name.localeCompare(b.squad.name))
 
-  const allCrossSquadRows: CrossSquadRow[] = healthEligible
-    .flatMap((project) =>
-      getProjectAssignments(project.id).map((assignment) => {
-        const designer = designerRepository.getById(assignment.designer_id)
-        return designer && isCrossSquadAssignment(project, designer)
-          ? { project, designer }
-          : null
-      })
-    )
-    .filter((row): row is { project: Project; designer: Designer } => row !== null)
-    .map(({ project, designer }) => ({
-      key: `${project.id}:${designer.id}`,
-      designer,
-      homeSquad: squadsById.get(designer.home_squad_id),
-      project,
-      ownerSquad: squadsById.get(project.owner_squad_id),
-    }))
-    .sort((a, b) => {
-      const priorityDiff = PRIORITIES.indexOf(a.project.priority) - PRIORITIES.indexOf(b.project.priority)
-      return priorityDiff !== 0 ? priorityDiff : a.designer.name.localeCompare(b.designer.name)
+  const crossSquadProjectsByDesignerId = new Map<string, Project[]>()
+  for (const project of healthEligible) {
+    for (const assignment of getProjectAssignments(project.id)) {
+      const designer = designerRepository.getById(assignment.designer_id)
+      if (!designer || !isCrossSquadAssignment(project, designer)) continue
+      const list = crossSquadProjectsByDesignerId.get(designer.id) ?? []
+      list.push(project)
+      crossSquadProjectsByDesignerId.set(designer.id, list)
+    }
+  }
+
+  const allCrossSquadRows: CrossSquadRow[] = [...crossSquadProjectsByDesignerId.entries()]
+    .map(([designerId, projects]) => {
+      const designer = designerRepository.getById(designerId)!
+      return {
+        designer,
+        homeSquad: squadsById.get(designer.home_squad_id),
+        projects: [...projects].sort((a, b) => a.name.localeCompare(b.name)),
+      }
     })
+    .sort((a, b) => a.designer.name.localeCompare(b.designer.name))
+
+  const allDesigners = designerRepository.getAll()
 
   return {
     activeCount: activeProjects.length,
-    proposedCount: proposedProjects.length,
-    activeDesignerCount: designerRepository.getAll().filter((d) => d.status === "Active").length,
+    activeDesignerCount: allDesigners.filter((d) => d.status === "Active").length,
     unassignedCount: unassignedProjects.length,
     priorityRows,
-    upcomingRows,
     healthCounts,
     teamRows,
     crossSquadRows: allCrossSquadRows.slice(0, CROSS_SQUAD_CAP),
     crossSquadTotal: allCrossSquadRows.length,
     hasAnyProjects: allProjects.length > 0,
+    designers: allDesigners,
   }
 }
 
@@ -203,10 +193,12 @@ export default function OverviewPage() {
   }, [])
 
   useEffect(() => {
-    // One-time bootstrap read of a synchronous, browser-only data source
-    // (localStorage via the repository layer), not a subscription.
+    // Subscribes to the store rather than to one repository's list, because
+    // this page derives from six tables at once. Re-reads on every change,
+    // including edits made by other people (docs/DECISIONS.md).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
+    return subscribe(load)
   }, [load])
 
   if (data === undefined) {
@@ -237,8 +229,10 @@ export default function OverviewPage() {
     )
   }
 
+  const healthTotal = PROJECT_HEALTHS.reduce((sum, health) => sum + data.healthCounts[health], 0)
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <PageHeader
         title="Design Portfolio"
         description="Current status across active work, timeline, and the design team."
@@ -246,18 +240,28 @@ export default function OverviewPage() {
 
       <ContentSection bodyClassName="flex flex-wrap divide-x divide-border p-0">
         <Stat label="Active Projects" value={data.activeCount} />
-        <Stat label="Upcoming / Proposed" value={data.proposedCount} />
         <Stat label="Designers" value={data.activeDesignerCount} />
         <Stat
           label="Unassigned Projects"
           value={data.unassignedCount}
           emphasize={data.unassignedCount > 0}
+          href={data.unassignedCount > 0 ? `/projects?designLead=${UNASSIGNED_DESIGN_LEAD}` : undefined}
         />
       </ContentSection>
 
       <ContentSection
         title="Priority Projects"
         description="Active work (Planning / In Progress), highest priority first."
+        actions={
+          data.activeCount > data.priorityRows.length ? (
+            <Link
+              href={`/projects?status=${["Planning", "In Progress"].map(encodeURIComponent).join(",")}`}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              View all {data.activeCount}
+            </Link>
+          ) : undefined
+        }
       >
         {data.priorityRows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No active projects right now.</p>
@@ -266,21 +270,20 @@ export default function OverviewPage() {
             {data.priorityRows.map(({ project, squad, lead }) => (
               <li key={project.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 py-3 first:pt-0 last:pb-0">
                 <PriorityBadge priority={project.priority} />
-                <Link
+                <ProjectNameLink
                   href={`/projects/${project.id}`}
-                  className="min-w-40 flex-1 text-sm font-medium text-foreground hover:underline"
-                >
-                  {project.name}
-                </Link>
+                  name={project.name}
+                  className="min-w-40 flex-1"
+                />
                 <span className="w-36 shrink-0 text-sm text-muted-foreground">{formatRange(project)}</span>
                 <span className="w-28 shrink-0 text-sm text-muted-foreground">{squad?.name ?? "–"}</span>
-                <span
-                  className={cn(
-                    "w-28 shrink-0 text-sm",
-                    lead ? "text-muted-foreground" : "font-medium text-status-warning"
-                  )}
-                >
-                  {lead?.name ?? "Unassigned"}
+                <span className="w-40 shrink-0">
+                  <AssignLeadControl
+                    projectId={project.id}
+                    lead={lead}
+                    designers={data.designers}
+                    onAssigned={load}
+                  />
                 </span>
                 <HealthBadge health={project.health} />
               </li>
@@ -289,49 +292,54 @@ export default function OverviewPage() {
         )}
       </ContentSection>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <ContentSection title="Upcoming Projects" description="Proposed work, earliest start first." className="lg:col-span-3">
-          {data.upcomingRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No upcoming projects right now.</p>
-          ) : (
-            <ul className="divide-y divide-border">
-              {data.upcomingRows.map(({ project, squad, lead }) => (
-                <li key={project.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3 first:pt-0 last:pb-0">
-                  <PriorityBadge priority={project.priority} />
-                  <Link
-                    href={`/projects/${project.id}`}
-                    className="min-w-40 flex-1 text-sm font-medium text-foreground hover:underline"
-                  >
-                    {project.name}
-                  </Link>
-                  <span className="text-sm text-muted-foreground">
-                    Starts {formatMonth(project.start_month)}
-                  </span>
-                  <span className="text-sm text-muted-foreground">{squad?.name ?? "–"}</span>
-                  {!lead ? (
-                    <span className="text-xs font-medium text-status-warning">
-                      Design Lead not assigned
-                    </span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </ContentSection>
-
-        <ContentSection title="Project Health" description="Across active and on-hold work." className="lg:col-span-2">
-          <ul className="space-y-3">
-            {PROJECT_HEALTHS.map((health) => (
-              <li key={health} className="flex items-center justify-between">
+      <ContentSection title="Project Health" description="Across active and on-hold work.">
+        {healthTotal > 0 ? (
+          <div className="mb-4 flex h-2.5 w-full gap-0.5">
+            {PROJECT_HEALTHS.map((health) => {
+              const count = data.healthCounts[health]
+              if (count === 0) return null
+              return (
+                <Link
+                  key={health}
+                  href={`/projects?health=${encodeURIComponent(health)}`}
+                  title={`${health}: ${count} of ${healthTotal}`}
+                  aria-label={`${health}: ${count} of ${healthTotal} projects`}
+                  style={{ flexGrow: count }}
+                  className={cn(
+                    "min-w-1.5 rounded-full transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    healthSolidClassName(health)
+                  )}
+                />
+              )
+            })}
+          </div>
+        ) : null}
+        <ul className="space-y-1">
+          {PROJECT_HEALTHS.map((health) => {
+            const count = data.healthCounts[health]
+            const row = (
+              <>
                 <HealthBadge health={health} />
-                <span className="text-sm font-semibold tabular-nums text-foreground">
-                  {data.healthCounts[health]}
-                </span>
+                <span className="text-sm font-semibold tabular-nums text-foreground">{count}</span>
+              </>
+            )
+            return (
+              <li key={health}>
+                {count > 0 ? (
+                  <Link
+                    href={`/projects?health=${encodeURIComponent(health)}`}
+                    className="-mx-2 flex items-center justify-between rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+                  >
+                    {row}
+                  </Link>
+                ) : (
+                  <div className="flex items-center justify-between px-2 py-1.5">{row}</div>
+                )}
               </li>
-            ))}
-          </ul>
-        </ContentSection>
-      </div>
+            )
+          })}
+        </ul>
+      </ContentSection>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <ContentSection title="Team Snapshot" className="lg:col-span-2">
@@ -357,30 +365,29 @@ export default function OverviewPage() {
           )}
         </ContentSection>
 
-        <ContentSection title="Cross-squad Support" className="lg:col-span-3">
+        <ContentSection
+          title="Cross-squad Support"
+          description="Designers helping outside their Home Squad."
+          className="lg:col-span-3"
+        >
           {data.crossSquadRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">No cross-squad support right now.</p>
           ) : (
             <>
               <ul className="space-y-3">
                 {data.crossSquadRows.map((row) => (
-                  <li key={row.key} className="flex items-center gap-2 text-sm">
+                  <li key={row.designer.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                     <PersonAvatar person={row.designer} size="sm" />
                     <span className="font-medium text-foreground">{row.designer.name}</span>
-                    <span className="text-muted-foreground">
-                      {row.homeSquad?.name ?? "–"} →{" "}
-                      <Link href={`/projects/${row.project.id}`} className="hover:underline">
-                        {row.project.name}
-                      </Link>{" "}
-                      / {row.ownerSquad?.name ?? "–"}
-                    </span>
+                    <span className="text-xs text-muted-foreground">{row.homeSquad?.name ?? "–"}</span>
+                    <SupportingProjects projects={row.projects} />
                   </li>
                 ))}
               </ul>
               {data.crossSquadTotal > data.crossSquadRows.length ? (
                 <p className="mt-3 text-xs text-muted-foreground">
-                  +{data.crossSquadTotal - data.crossSquadRows.length} more cross-squad assignment
-                  {data.crossSquadTotal - data.crossSquadRows.length === 1 ? "" : "s"}.
+                  +{data.crossSquadTotal - data.crossSquadRows.length} more designer
+                  {data.crossSquadTotal - data.crossSquadRows.length === 1 ? "" : "s"} with cross-squad support.
                 </p>
               ) : null}
             </>
@@ -395,11 +402,13 @@ interface StatProps {
   label: string
   value: number
   emphasize?: boolean
+  /** When set, the stat becomes a drill-down entry point into the underlying data (task ask §9) — still visually a stat, not a CTA. */
+  href?: string
 }
 
-function Stat({ label, value, emphasize }: StatProps) {
-  return (
-    <div className="min-w-36 flex-1 px-5 py-4">
+function Stat({ label, value, emphasize, href }: StatProps) {
+  const body = (
+    <>
       <p
         className={cn(
           "text-2xl font-semibold tabular-nums",
@@ -408,7 +417,25 @@ function Stat({ label, value, emphasize }: StatProps) {
       >
         {value}
       </p>
-      <p className="text-xs text-muted-foreground">{label}</p>
-    </div>
+      <p className="flex items-center gap-1 text-xs text-muted-foreground">
+        {label}
+        {href ? (
+          <ChevronRight className="size-3 opacity-0 transition-opacity group-hover/stat:opacity-100 group-focus-visible/stat:opacity-100" />
+        ) : null}
+      </p>
+    </>
+  )
+
+  if (!href) {
+    return <div className="min-w-36 flex-1 px-5 py-4">{body}</div>
+  }
+
+  return (
+    <Link
+      href={href}
+      className="group/stat min-w-36 flex-1 px-5 py-4 transition-colors hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+    >
+      {body}
+    </Link>
   )
 }

@@ -1,6 +1,10 @@
 // Compact enterprise-grade filter toolbar for the Projects list — replaces
 // the old two-row bank of equal-weight <Select>s (docs/CHANGELOG.md).
 //
+// Layout, search box, the "Clear filters" action and the chip row all come
+// from the shared <FilterBar> (components/shared/filter-bar.tsx); this file
+// only supplies the Projects-specific controls and chip definitions.
+//
 // Interaction model:
 // - Search, Status, Priority, Department are quick filters, always live
 //   (every change applies immediately).
@@ -21,7 +25,7 @@
 
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { SlidersHorizontal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -29,7 +33,7 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
-import { SearchInput } from "@/components/shared/search-input"
+import { FilterBar } from "@/components/shared/filter-bar"
 import { FilterChip } from "@/components/shared/filter-chip"
 import { FilterMultiSelect, type FilterMultiSelectOption } from "@/components/shared/filter-multiselect"
 import { FilterSelect, type FilterSelectOption } from "@/components/shared/filter-select"
@@ -37,6 +41,7 @@ import { FilterSelect, type FilterSelectOption } from "@/components/shared/filte
 import { PRIORITIES, PROJECT_HEALTHS, PROJECT_STATUSES } from "@/lib/domain/enums"
 import type { Priority, ProjectHealth, ProjectStatus } from "@/lib/domain/enums"
 import type { Project } from "@/lib/domain/types"
+import { UNASSIGNED_DESIGN_LEAD } from "@/lib/selectors/projectSelectors"
 
 type TimelineFilter = "all" | "active" | "upcoming" | "past"
 
@@ -81,20 +86,26 @@ const TIMELINE_OPTIONS: FilterSelectOption[] = [
   { value: "past", label: "Past" },
 ]
 
-/** "YYYY-MM" for the current month — the pivot for the Timeline filter's buckets. */
-function currentMonthKey(): string {
+/** "YYYY-MM-DD" for today — the pivot for the Timeline filter's buckets. */
+function currentDateKey(): string {
   const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  return `${now.getFullYear()}-${month}-${day}`
 }
 
 /**
- * Buckets a project's start_month/end_month against `todayKey` ("YYYY-MM").
- * Plain string comparison is valid — both are always zero-padded "YYYY-MM"
- * (see docs/DECISIONS.md: no date library, no quarter concept, by design).
+ * Buckets a project's start_date/end_date against `todayKey` ("YYYY-MM-DD").
+ * Plain string comparison is valid — all three are always zero-padded ISO
+ * dates (see docs/DECISIONS.md: no quarter concept, no range picker).
+ *
+ * Day-accurate since Project moved off month strings: a project that ended on
+ * the 3rd now reads "Past" on the 12th, where the old month pivot kept calling
+ * it "Active now" until the month turned over.
  */
 function getProjectTimelineBucket(project: Project, todayKey: string): "active" | "upcoming" | "past" {
-  if (project.start_month > todayKey) return "upcoming"
-  if (project.end_month < todayKey) return "past"
+  if (project.start_date > todayKey) return "upcoming"
+  if (project.end_date < todayKey) return "past"
   return "active"
 }
 
@@ -107,6 +118,9 @@ interface ProjectsFilterBarProps {
   epicOptions: FilterSelectOption[]
   squadOptions: FilterSelectOption[]
   designerOptions: FilterSelectOption[]
+  /** The Active/Completed tabs already imply a status scope — the granular
+   * Status control is only meaningful (and only shown) inside the All tab. */
+  hideStatusFilter?: boolean
 }
 
 function ProjectsFilterBar({
@@ -118,20 +132,8 @@ function ProjectsFilterBar({
   epicOptions,
   squadOptions,
   designerOptions,
+  hideStatusFilter,
 }: ProjectsFilterBarProps) {
-  const searchInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault()
-        searchInputRef.current?.focus()
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [])
-
   const advancedFilterCount = [
     filters.epic !== "all",
     filters.squad !== "all",
@@ -144,7 +146,10 @@ function ProjectsFilterBar({
   const departmentLabel = departmentOptions.find((option) => option.value === filters.department)?.label
   const epicLabel = epicOptions.find((option) => option.value === filters.epic)?.label
   const squadLabel = squadOptions.find((option) => option.value === filters.squad)?.label
-  const designLeadLabel = designerOptions.find((option) => option.value === filters.designLead)?.label
+  const designLeadLabel =
+    filters.designLead === UNASSIGNED_DESIGN_LEAD
+      ? "Unassigned"
+      : designerOptions.find((option) => option.value === filters.designLead)?.label
   const timelineLabel = TIMELINE_OPTIONS.find((option) => option.value === filters.timeline)?.label
 
   const chips: { key: string; label: string; onRemove: () => void }[] = [
@@ -198,16 +203,21 @@ function ProjectsFilterBar({
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 px-4 py-2">
-        <SearchInput
-          ref={searchInputRef}
-          value={filters.search}
-          onChange={(value) => onFiltersChange({ search: value })}
-          placeholder="Search projects…"
-          className="min-w-40 max-w-80 flex-1"
-        />
-
+    <FilterBar
+      search={{
+        value: filters.search,
+        onChange: (value) => onFiltersChange({ search: value }),
+        placeholder: "Search projects…",
+      }}
+      hasFiltersApplied={hasFiltersApplied}
+      onClear={onClearAll}
+      chips={
+        chips.length > 0
+          ? chips.map((chip) => <FilterChip key={chip.key} label={chip.label} onRemove={chip.onRemove} />)
+          : undefined
+      }
+    >
+      {!hideStatusFilter ? (
         <FilterMultiSelect
           label="Status"
           options={STATUS_OPTIONS}
@@ -215,45 +225,35 @@ function ProjectsFilterBar({
           onChange={(status) => onFiltersChange({ status: status as ProjectStatus[] })}
           className="hidden md:inline-flex"
         />
-        <FilterMultiSelect
-          label="Priority"
-          options={PRIORITY_OPTIONS}
-          selected={filters.priority}
-          onChange={(priority) => onFiltersChange({ priority: priority as Priority[] })}
-          className="hidden md:inline-flex"
-        />
-        <FilterSelect
-          label="Department"
-          allLabel="All departments"
-          triggerPlaceholder="Department"
-          options={departmentOptions}
-          value={filters.department}
-          onChange={(department) => onFiltersChange({ department })}
-          className="hidden lg:inline-flex"
-        />
-
-        <AdvancedFiltersPopover
-          filters={filters}
-          onFiltersChange={onFiltersChange}
-          advancedFilterCount={advancedFilterCount}
-          departmentOptions={departmentOptions}
-          epicOptions={epicOptions}
-          squadOptions={squadOptions}
-          designerOptions={designerOptions}
-        />
-      </div>
-
-      {hasFiltersApplied ? (
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-4 py-2">
-          {chips.map((chip) => (
-            <FilterChip key={chip.key} label={chip.label} onRemove={chip.onRemove} />
-          ))}
-          <Button type="button" variant="ghost" size="xs" className="text-muted-foreground" onClick={onClearAll}>
-            Clear all
-          </Button>
-        </div>
       ) : null}
-    </div>
+      <FilterMultiSelect
+        label="Priority"
+        options={PRIORITY_OPTIONS}
+        selected={filters.priority}
+        onChange={(priority) => onFiltersChange({ priority: priority as Priority[] })}
+        className="hidden md:inline-flex"
+      />
+      <FilterSelect
+        label="Department"
+        allLabel="All departments"
+        triggerPlaceholder="Department"
+        options={departmentOptions}
+        value={filters.department}
+        onChange={(department) => onFiltersChange({ department })}
+        className="hidden lg:inline-flex"
+      />
+
+      <AdvancedFiltersPopover
+        filters={filters}
+        onFiltersChange={onFiltersChange}
+        advancedFilterCount={advancedFilterCount}
+        departmentOptions={departmentOptions}
+        epicOptions={epicOptions}
+        squadOptions={squadOptions}
+        designerOptions={designerOptions}
+        hideStatusFilter={hideStatusFilter}
+      />
+    </FilterBar>
   )
 }
 
@@ -294,6 +294,7 @@ interface AdvancedFiltersPopoverProps {
   epicOptions: FilterSelectOption[]
   squadOptions: FilterSelectOption[]
   designerOptions: FilterSelectOption[]
+  hideStatusFilter?: boolean
 }
 
 function AdvancedFiltersPopover({
@@ -304,6 +305,7 @@ function AdvancedFiltersPopover({
   epicOptions,
   squadOptions,
   designerOptions,
+  hideStatusFilter,
 }: AdvancedFiltersPopoverProps) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<AdvancedDraft>(() => draftFromFilters(filters))
@@ -349,13 +351,15 @@ function AdvancedFiltersPopover({
 
           <div className="space-y-1">
             <p className="px-1 text-xs font-medium text-muted-foreground">Quick filters</p>
-            <FilterMultiSelect
-              label="Status"
-              options={STATUS_OPTIONS}
-              selected={filters.status}
-              onChange={(status) => onFiltersChange({ status: status as ProjectStatus[] })}
-              variant="inline"
-            />
+            {!hideStatusFilter ? (
+              <FilterMultiSelect
+                label="Status"
+                options={STATUS_OPTIONS}
+                selected={filters.status}
+                onChange={(status) => onFiltersChange({ status: status as ProjectStatus[] })}
+                variant="inline"
+              />
+            ) : null}
             <FilterMultiSelect
               label="Priority"
               options={PRIORITY_OPTIONS}
@@ -402,7 +406,7 @@ function AdvancedFiltersPopover({
               <FilterSelect
                 label="Design Lead"
                 allLabel="All design leads"
-                options={designerOptions}
+                options={[{ value: UNASSIGNED_DESIGN_LEAD, label: "Unassigned" }, ...designerOptions]}
                 value={draft.designLead}
                 onChange={(designLead) => patchDraft({ designLead })}
                 searchable
@@ -435,7 +439,7 @@ function AdvancedFiltersPopover({
                 checked={draft.showArchived}
                 onCheckedChange={(showArchived) => patchDraft({ showArchived })}
               />
-              Show archived projects
+              Show archived
             </Label>
           </div>
         </div>
@@ -462,5 +466,5 @@ function FilterField({ label, children }: { label: string; children: ReactNode }
   )
 }
 
-export { ProjectsFilterBar, DEFAULT_FILTERS, currentMonthKey, getProjectTimelineBucket }
+export { ProjectsFilterBar, DEFAULT_FILTERS, currentDateKey, getProjectTimelineBucket }
 export type { ProjectFilters, TimelineFilter }

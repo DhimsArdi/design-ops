@@ -1,8 +1,9 @@
 // Generic multi-select checklist: a scrollable, bordered list of checkbox
 // rows. Used by the Project form wizard for Product Owner / Project Admin
-// (stakeholders) and Supporting Designers — anywhere PRD §21/§23 calls for
-// "multi-select from Master Data" at a scale too small to need a combobox
-// library (a handful to a few dozen rows).
+// (stakeholders) and Supporting Designers, and by Teams' Assign Designers
+// dialog — anywhere the product calls for "multi-select from Master Data" at
+// a scale too small to need a combobox library (a handful to a few dozen
+// rows).
 
 import type { ReactNode } from "react"
 import { Checkbox } from "@/components/ui/checkbox"

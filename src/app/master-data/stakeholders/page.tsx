@@ -1,13 +1,16 @@
 "use client"
 
 import { useEffect, useState, type FormEvent } from "react"
+import { toast } from "sonner"
 import { MoreHorizontal, Plus, SearchX, Users } from "lucide-react"
 
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
 import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
-import { SearchInput } from "@/components/shared/search-input"
+import { FilterBar } from "@/components/shared/filter-bar"
+import { FilterSelect, type FilterSelectOption } from "@/components/shared/filter-select"
+import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,6 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
@@ -43,8 +47,11 @@ import {
 } from "@/components/ui/table"
 import { STAKEHOLDER_TYPES, type StakeholderType } from "@/lib/domain/enums"
 import type { Department, Stakeholder } from "@/lib/domain/types"
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
+import { subscribe } from "@/lib/store/dataStore"
 import * as departmentRepository from "@/lib/repositories/departmentRepository"
 import * as stakeholderRepository from "@/lib/repositories/stakeholderRepository"
+import { getStakeholderUsage } from "@/lib/selectors/stakeholderSelectors"
 
 interface StakeholderFormState {
   name: string
@@ -68,24 +75,35 @@ const EMPTY_FORM: StakeholderFormState = {
 
 type TypeFilter = "all" | StakeholderType
 
+const TYPE_OPTIONS: FilterSelectOption[] = STAKEHOLDER_TYPES.map((type) => ({
+  value: type,
+  label: type,
+}))
+
 export default function StakeholdersPage() {
   const [stakeholders, setStakeholders] = useState<Stakeholder[] | null>(null)
   const [departments, setDepartments] = useState<Department[] | null>(null)
 
   const [search, setSearch] = useState("")
+  const debouncedSearch = useDebouncedValue(search, 250)
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<StakeholderFormState>(EMPTY_FORM)
   const [errors, setErrors] = useState<StakeholderFormErrors>({})
+  const [deletingStakeholder, setDeletingStakeholder] = useState<Stakeholder | null>(null)
 
   useEffect(() => {
-    // One-time bootstrap read of a synchronous, browser-only data source
-    // (localStorage via the repository layer), not a subscription.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setStakeholders(stakeholderRepository.getAll())
-    setDepartments(departmentRepository.getAll())
+    function read() {
+      setStakeholders(stakeholderRepository.getAll())
+      setDepartments(departmentRepository.getAll())
+    }
+    // Reads both tables now and again on every change to the shared cache, so
+    // this page follows edits made elsewhere (docs/DECISIONS.md). Subscribes to
+    // the store rather than to one repository's list because it needs two.
+    read()
+    return subscribe(read)
   }, [])
 
   function refresh() {
@@ -113,10 +131,25 @@ export default function StakeholdersPage() {
   }
 
   function handleToggleStatus(stakeholder: Stakeholder) {
-    stakeholderRepository.setStatus(
-      stakeholder.id,
-      stakeholder.status === "Active" ? "Inactive" : "Active"
-    )
+    const nextStatus = stakeholder.status === "Active" ? "Inactive" : "Active"
+    stakeholderRepository.setStatus(stakeholder.id, nextStatus)
+    toast.success(`${stakeholder.name} set to ${nextStatus}`)
+    refresh()
+  }
+
+  function handleForceDeleteConfirm() {
+    if (!deletingStakeholder) return
+    stakeholderRepository.removeCascade(deletingStakeholder.id)
+    toast.success(`${deletingStakeholder.name} deleted`, {
+      description:
+        "Removed from their projects; any department they headed now has no head.",
+    })
+  }
+
+  function handleDeleteConfirm() {
+    if (!deletingStakeholder) return
+    stakeholderRepository.remove(deletingStakeholder.id)
+    toast.success(`${deletingStakeholder.name} deleted`)
     refresh()
   }
 
@@ -150,6 +183,7 @@ export default function StakeholdersPage() {
       })
     }
 
+    toast.success(`${form.name.trim()} ${editingId ? "updated" : "added"}`)
     refresh()
     setDialogOpen(false)
   }
@@ -180,7 +214,7 @@ export default function StakeholdersPage() {
       : activeDepartments
 
   const filteredStakeholders = (stakeholders ?? []).filter((stakeholder) => {
-    const query = search.trim().toLowerCase()
+    const query = debouncedSearch.trim().toLowerCase()
     const matchesSearch =
       !query ||
       stakeholder.name.toLowerCase().includes(query) ||
@@ -205,14 +239,7 @@ export default function StakeholdersPage() {
         }
       />
 
-      <ContentSection
-        title={
-          hasAnyStakeholders
-            ? `${filteredStakeholders.length} of ${stakeholders?.length ?? 0} stakeholders`
-            : undefined
-        }
-        bodyClassName="space-y-4"
-      >
+      <ContentSection bodyClassName="space-y-4">
         {isLoading ? (
           <p className="py-10 text-center text-sm text-muted-foreground">
             Loading stakeholders…
@@ -231,39 +258,29 @@ export default function StakeholdersPage() {
           />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <SearchInput
-                value={search}
-                onChange={setSearch}
-                placeholder="Search by name or title…"
-                className="w-full sm:w-64"
+            <FilterBar
+              search={{ value: search, onChange: setSearch, placeholder: "Search stakeholders…" }}
+              hasFiltersApplied={hasFiltersApplied}
+              onClear={clearFilters}
+            >
+              <FilterSelect
+                label="Type"
+                allLabel="All types"
+                triggerPlaceholder="Type"
+                options={TYPE_OPTIONS}
+                value={typeFilter}
+                onChange={(type) => setTypeFilter(type as TypeFilter)}
               />
-              <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value ?? "all")}>
-                <SelectTrigger className="w-full sm:w-48" aria-label="Filter by stakeholder type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All types</SelectItem>
-                  {STAKEHOLDER_TYPES.map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {type}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            </FilterBar>
 
             {filteredStakeholders.length === 0 ? (
               <EmptyState
                 icon={SearchX}
-                title="No stakeholders match"
-                description="Try a different search term, or clear the type filter."
+                title="No stakeholders match these filters"
                 action={
-                  hasFiltersApplied ? (
-                    <Button variant="outline" onClick={clearFilters}>
-                      Clear filters
-                    </Button>
-                  ) : undefined
+                  <Button variant="outline" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
                 }
               />
             ) : (
@@ -310,6 +327,13 @@ export default function StakeholdersPage() {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleToggleStatus(stakeholder)}>
                               {stakeholder.status === "Active" ? "Deactivate" : "Activate"}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => setDeletingStakeholder(stakeholder)}
+                            >
+                              Delete
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -381,7 +405,11 @@ export default function StakeholdersPage() {
                   aria-invalid={Boolean(errors.departmentId)}
                   aria-describedby={errors.departmentId ? "stakeholder-department-error" : undefined}
                 >
-                  <SelectValue placeholder="Select department" />
+                  <SelectValue placeholder="Select department">
+                    {(departmentId: string) =>
+                      departmentOptions.find((d) => d.id === departmentId)?.name ?? ""
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {departmentOptions.map((department) => (
@@ -442,6 +470,30 @@ export default function StakeholdersPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {deletingStakeholder ? (
+        <DeleteEntityDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setDeletingStakeholder(null)
+          }}
+          entityLabel="stakeholder"
+          entityName={deletingStakeholder.name}
+          blockers={(() => {
+            const usage = getStakeholderUsage(deletingStakeholder.id)
+            return [
+              { label: "department head role", count: usage.departmentHeadCount },
+              { label: "project", count: usage.projectCount },
+            ]
+          })()}
+          onConfirm={handleDeleteConfirm}
+          force={{
+            consequence:
+              "Deleting anyway removes them from those projects and leaves any department they headed without a head.",
+            onConfirm: handleForceDeleteConfirm,
+          }}
+        />
+      ) : null}
     </div>
   )
 }

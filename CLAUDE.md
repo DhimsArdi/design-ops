@@ -1,6 +1,6 @@
-# CLAUDE.md — Design Portfolio Planner
+# CLAUDE.md — DesignOps
 
-Project: **Design Portfolio Planner** (internal web app for mapping projects, timelines, design team structure, squads, designers, project ownership, business stakeholders, and cross-squad designer assignments).
+Project: **DesignOps** (internal web app for mapping projects, timelines, design team structure, squads, designers, project ownership, business stakeholders, and cross-squad designer assignments).
 
 Status: MVP built. All PRD phases (scaffold/domain/repositories/selectors/shell, Master Data CRUD, Projects, Timeline, Overview, People, Teams, search/filter/edge cases, UI/UX polish) are implemented and validated; see `docs/DECISIONS.md` for architecture decisions made along the way.
 

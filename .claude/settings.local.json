@@ -1,5 +1,14 @@
 {
-  "description": "Impeccable design detector: immediate-tier checks after Edit/Write on UI files, full-rule deep pass on Stop.",
+  "permissions": {
+    "allow": [
+      "Bash(python3 -)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(sed -n '/interface ProjectAssignment/,/^}/p' src/lib/domain/types.ts)",
+      "Bash(sed -n '/interface ProjectMonthlyTarget/,/^}/p' src/lib/domain/types.ts)",
+      "Bash(sed -n '/interface ProjectWeeklyFocus/,/^}/p' src/lib/domain/types.ts)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
@@ -26,5 +35,6 @@
         ]
       }
     ]
-  }
+  },
+  "description": "Impeccable design detector: immediate-tier checks after Edit/Write on UI files, full-rule deep pass on Stop."
 }

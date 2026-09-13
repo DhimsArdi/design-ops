@@ -18,7 +18,6 @@ import { ContentSection } from "@/components/shared/content-section"
 import { EmptyState } from "@/components/shared/empty-state"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
 import { PersonAvatar } from "@/components/shared/person-avatar"
-import { SearchInput } from "@/components/shared/search-input"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -29,6 +28,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
+import { PeopleFilterBar, DEFAULT_PEOPLE_FILTERS, type PeopleFilters } from "./_components/people-filter-bar"
+
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
 import { useRepositoryList } from "@/lib/hooks/use-repository-list"
 import * as designerRepository from "@/lib/repositories/designerRepository"
 import * as squadRepository from "@/lib/repositories/squadRepository"
@@ -54,12 +56,26 @@ export default function PeoplePage() {
   const [projects] = useRepositoryList(projectRepository)
   const [assignments] = useRepositoryList(projectAssignmentRepository)
 
-  const [query, setQuery] = useState("")
+  const [filters, setFilters] = useState<PeopleFilters>(DEFAULT_PEOPLE_FILTERS)
+  const debouncedSearch = useDebouncedValue(filters.search, 250)
 
   const squadsById = useMemo(() => new Map(squads.map((squad) => [squad.id, squad])), [squads])
   const projectsById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [
     projects,
   ])
+
+  const squadOptions = useMemo(
+    () => [...squads].sort((a, b) => a.name.localeCompare(b.name)).map((squad) => ({ value: squad.id, label: squad.name })),
+    [squads]
+  )
+
+  function patchFilters(patch: Partial<PeopleFilters>) {
+    setFilters((prev) => ({ ...prev, ...patch }))
+  }
+
+  function clearFilters() {
+    setFilters(DEFAULT_PEOPLE_FILTERS)
+  }
 
   // Every count below is scoped to non-archived projects only (task spec) —
   // archived rows are skipped before either count is incremented.
@@ -81,15 +97,41 @@ export default function PeoplePage() {
   }, [designers, assignments, projectsById])
 
   const visibleDesigners = useMemo(() => {
-    const trimmedQuery = query.trim().toLowerCase()
-    const matches = trimmedQuery
-      ? designers.filter((designer) => designer.name.toLowerCase().includes(trimmedQuery))
-      : designers
+    const trimmedQuery = debouncedSearch.trim().toLowerCase()
+
+    const matches = designers.filter((designer) => {
+      if (filters.squad !== "all" && designer.home_squad_id !== filters.squad) return false
+      if (filters.seniority.length > 0 && !filters.seniority.includes(designer.seniority)) return false
+      if (filters.status !== "all" && designer.status !== filters.status) return false
+
+      if (filters.assignment !== "all") {
+        const hasActiveProject = (statsByDesignerId.get(designer.id)?.activeProjects ?? 0) > 0
+        if (filters.assignment === "assigned" && !hasActiveProject) return false
+        if (filters.assignment === "unassigned" && hasActiveProject) return false
+      }
+
+      if (trimmedQuery) {
+        const squad = squadsById.get(designer.home_squad_id)
+        const matchesSearch =
+          designer.name.toLowerCase().includes(trimmedQuery) ||
+          designer.job_title.toLowerCase().includes(trimmedQuery) ||
+          Boolean(squad?.name.toLowerCase().includes(trimmedQuery))
+        if (!matchesSearch) return false
+      }
+
+      return true
+    })
     return [...matches].sort((a, b) => a.name.localeCompare(b.name))
-  }, [designers, query])
+  }, [designers, debouncedSearch, filters, squadsById, statsByDesignerId])
 
   const hasAnyDesigners = designers.length > 0
   const hasResults = visibleDesigners.length > 0
+  const hasFiltersApplied =
+    filters.search.trim() !== "" ||
+    filters.squad !== "all" ||
+    filters.seniority.length > 0 ||
+    filters.status !== "all" ||
+    filters.assignment !== "all"
 
   return (
     <div className="space-y-6">
@@ -108,10 +150,7 @@ export default function PeoplePage() {
         }
       />
 
-      <ContentSection
-        title={hasAnyDesigners ? `${visibleDesigners.length} of ${designers.length} people` : undefined}
-        bodyClassName="space-y-4"
-      >
+      <ContentSection bodyClassName="space-y-4">
         {!hasAnyDesigners ? (
           <EmptyState
             icon={Users}
@@ -125,23 +164,21 @@ export default function PeoplePage() {
           />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <SearchInput
-                value={query}
-                onChange={setQuery}
-                placeholder="Search people…"
-                className="w-full sm:w-64"
-              />
-            </div>
+            <PeopleFilterBar
+              filters={filters}
+              onFiltersChange={patchFilters}
+              onClearAll={clearFilters}
+              hasFiltersApplied={hasFiltersApplied}
+              squadOptions={squadOptions}
+            />
 
             {!hasResults ? (
               <EmptyState
                 icon={SearchX}
-                title="No designers match your search"
-                description={`Nothing matches "${query}". Try a different name.`}
+                title="No designers match these filters"
                 action={
-                  <Button variant="outline" onClick={() => setQuery("")}>
-                    Clear search
+                  <Button variant="outline" onClick={clearFilters}>
+                    Clear filters
                   </Button>
                 }
               />

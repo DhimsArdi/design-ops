@@ -105,6 +105,7 @@ function FilterMultiSelect({
           <Button
             variant="outline"
             size="sm"
+            aria-label={`Filter by ${label.toLowerCase()}`}
             className={cn(hasSelection ? "text-foreground" : "text-muted-foreground", className)}
           />
         }

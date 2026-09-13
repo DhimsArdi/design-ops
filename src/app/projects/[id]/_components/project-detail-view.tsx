@@ -1,23 +1,42 @@
 "use client"
 
-// Project Detail (PRD §14.4). Answers "what/where/who/when" for one project:
-// business context (Epic/Department/stakeholders), design ownership (Owner
-// Squad/Squad Lead/Project Design Lead/Support), timeline + monthly targets,
-// and freshness metadata. Archive/Unarchive lives here too (§25) — separate
-// from Status, never a delete.
+// Project Detail (PRD §14.4) — a Project Control Page: what/where/who/when
+// for one project, scannable in a few seconds, not a database record dump.
+// One primary content surface (Overview / Design Team / Timeline & Monthly
+// Targets / Weekly Plan, separated by subtle dividers and typography, not
+// stacked cards) plus a lightweight "Project Details" footer for metadata.
+//
+// Lifecycle actions (Mark as complete / Put on hold / Cancel / Reopen /
+// Archive / Delete) live in the header's overflow menu, contextual on the
+// project's current status — see docs/PRD.MD §25 and docs/DECISIONS.md for
+// why Archive stays a separate concept from Status.
 //
 // Reads go straight through the repository/selector layer rather than the
 // useRepositoryList hook: this page needs one record by id plus several
 // small derived lookups, not a reactive list. To avoid an SSR/client
-// hydration mismatch (server and first client paint have no localStorage),
-// data starts as `undefined` ("loading") and is filled in a mount effect —
-// the same one-time-bootstrap-read pattern already used by
-// app/overview/page.tsx and app/master-data/squads/page.tsx.
+// hydration mismatch (the cache is browser-only), data starts as `undefined`
+// ("loading") and is filled in a mount effect that then stays subscribed to
+// the store — the same pattern used by app/overview/page.tsx.
 
 import { useCallback, useEffect, useState } from "react"
 import type { ReactNode } from "react"
 import Link from "next/link"
-import { Archive, ArchiveRestore, ArrowLeft, Pencil } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+import {
+  Archive,
+  ArchiveRestore,
+  ArrowLeft,
+  Ban,
+  CheckCircle2,
+  Info,
+  MoreHorizontal,
+  PauseCircle,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from "lucide-react"
 
 import { PageHeader } from "@/components/shared/page-header"
 import { ContentSection } from "@/components/shared/content-section"
@@ -26,24 +45,30 @@ import { StatusBadge } from "@/components/shared/status-badge"
 import { PriorityBadge } from "@/components/shared/priority-badge"
 import { HealthBadge } from "@/components/shared/health-badge"
 import { PersonAvatar } from "@/components/shared/person-avatar"
+import { AssignLeadControl } from "@/components/shared/assign-lead-control"
+import { ConfirmDialog } from "@/components/shared/confirm-dialog"
+import { DeleteEntityDialog } from "@/components/shared/delete-entity-dialog"
+import { MarkCompleteDialog } from "./mark-complete-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 
+import { subscribe } from "@/lib/store/dataStore"
 import * as projectRepository from "@/lib/repositories/projectRepository"
 import * as epicRepository from "@/lib/repositories/epicRepository"
 import * as departmentRepository from "@/lib/repositories/departmentRepository"
 import * as stakeholderRepository from "@/lib/repositories/stakeholderRepository"
 import * as squadRepository from "@/lib/repositories/squadRepository"
+import * as designerRepository from "@/lib/repositories/designerRepository"
 import * as projectMonthlyTargetRepository from "@/lib/repositories/projectMonthlyTargetRepository"
 import { getSquadLead } from "@/lib/selectors/squadSelectors"
 import {
@@ -78,6 +103,8 @@ interface ProjectDetailData {
   supportDesigners: Designer[]
   monthlyTargets: ProjectMonthlyTarget[]
   weeklyFocus: ProjectWeeklyFocus[]
+  /** Candidates for the inline "Assign" Design Lead control when unassigned. */
+  designers: Designer[]
 }
 
 function resolveStakeholders(ids: string[]): Stakeholder[] {
@@ -109,6 +136,7 @@ function loadProjectDetail(projectId: string): ProjectDetailData | null {
       .filter((target) => target.project_id === project.id)
       .sort((a, b) => a.month.localeCompare(b.month)),
     weeklyFocus: getProjectWeeklyFocus(project.id),
+    designers: designerRepository.getAll(),
   }
 }
 
@@ -194,27 +222,75 @@ interface ProjectDetailViewProps {
 }
 
 export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
+  const router = useRouter()
   const [data, setData] = useState<ProjectDetailData | null | undefined>(undefined)
+
+  const [markCompleteOpen, setMarkCompleteOpen] = useState(false)
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const load = useCallback(() => {
     setData(loadProjectDetail(projectId))
   }, [projectId])
 
   useEffect(() => {
-    // One-time bootstrap read of a synchronous, browser-only data source
-    // (localStorage via the repository layer), not a subscription.
+    // Subscribes to the store rather than to one repository's list, because
+    // this view joins project, epic, department, squad, assignment, target and
+    // weekly-focus data. Re-reads on every change, including edits made by
+    // other people (docs/DECISIONS.md).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
+    return subscribe(load)
   }, [load])
 
-  function handleArchiveToggle() {
+  // `message` is optional because MarkCompleteDialog passes this straight in as
+  // its onCompleted callback and raises its own toast.
+  function applyUpdate(updated: Project | undefined, message?: string) {
+    if (!updated) return
+    setData((current) => (current ? { ...current, project: updated } : current))
+    if (message) toast.success(message)
+  }
+
+  function handleUnarchive() {
     if (!data) return
-    const updated = data.project.is_archived
-      ? projectRepository.unarchive(data.project.id)
-      : projectRepository.archive(data.project.id)
-    if (updated) {
-      setData((current) => (current ? { ...current, project: updated } : current))
-    }
+    applyUpdate(projectRepository.unarchive(data.project.id), `${data.project.name} restored from archive`)
+  }
+
+  function handleArchiveConfirm() {
+    if (!data) return
+    applyUpdate(projectRepository.archive(data.project.id), `${data.project.name} archived`)
+  }
+
+  function handlePutOnHold() {
+    if (!data) return
+    applyUpdate(projectRepository.update(data.project.id, { status: "On Hold" }), `${data.project.name} put on hold`)
+  }
+
+  function handleResume() {
+    if (!data) return
+    applyUpdate(projectRepository.update(data.project.id, { status: "In Progress" }), `${data.project.name} resumed`)
+  }
+
+  function handleReopen() {
+    if (!data) return
+    applyUpdate(
+      projectRepository.update(data.project.id, { status: "In Progress", completed_at: null }),
+      `${data.project.name} reopened`
+    )
+  }
+
+  function handleCancelConfirm() {
+    if (!data) return
+    applyUpdate(projectRepository.update(data.project.id, { status: "Cancelled" }), `${data.project.name} cancelled`)
+  }
+
+  function handleDeleteConfirm() {
+    if (!data) return
+    const { name } = data.project
+    projectRepository.removeCascade(data.project.id)
+    toast.success(`${name} deleted`)
+    router.push("/projects")
   }
 
   if (data === undefined) {
@@ -249,11 +325,14 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
     supportDesigners,
     monthlyTargets,
     weeklyFocus,
+    designers,
   } = data
   const weeklyPlan = groupWeeklyFocusByMonth(weeklyFocus)
   const phaseByMonth = new Map(monthlyTargets.map((target) => [target.month, target.phase]))
 
   const flagReview = isNeedsReview(project)
+  const isOnHold = project.status === "On Hold"
+  const isTerminal = project.status === "Completed" || project.status === "Cancelled"
 
   return (
     <div className="space-y-6">
@@ -273,10 +352,55 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
               <Pencil />
               Edit
             </Button>
-            <Button variant="outline" onClick={handleArchiveToggle}>
-              {project.is_archived ? <ArchiveRestore /> : <Archive />}
-              {project.is_archived ? "Unarchive" : "Archive"}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" size="icon" />}>
+                <MoreHorizontal />
+                <span className="sr-only">More project actions</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-auto min-w-[280px] [&_[data-slot=dropdown-menu-item]]:whitespace-nowrap">
+                {isTerminal ? (
+                  <DropdownMenuItem onClick={handleReopen}>
+                    <RotateCcw />
+                    Reopen project
+                  </DropdownMenuItem>
+                ) : (
+                  <>
+                    {isOnHold ? (
+                      <DropdownMenuItem onClick={handleResume}>
+                        <RotateCcw />
+                        Resume project
+                      </DropdownMenuItem>
+                    ) : null}
+                    <DropdownMenuItem onClick={() => setMarkCompleteOpen(true)}>
+                      <CheckCircle2 />
+                      Mark as complete
+                    </DropdownMenuItem>
+                    {!isOnHold ? (
+                      <DropdownMenuItem onClick={handlePutOnHold}>
+                        <PauseCircle />
+                        Put on hold
+                      </DropdownMenuItem>
+                    ) : null}
+                    <DropdownMenuItem onClick={() => setCancelConfirmOpen(true)}>
+                      <Ban />
+                      Cancel project
+                    </DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={project.is_archived ? handleUnarchive : () => setArchiveConfirmOpen(true)}
+                >
+                  {project.is_archived ? <ArchiveRestore /> : <Archive />}
+                  {project.is_archived ? "Unarchive project" : "Archive project"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
+                  <Trash2 />
+                  Delete project
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         }
       />
@@ -293,166 +417,235 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
           </Badge>
         ) : null}
         <span className="text-sm text-muted-foreground">
-          {formatMonth(project.start_month)} – {formatMonth(project.end_month)}
+          {formatDate(project.start_date)} – {formatDate(project.end_date)}
         </span>
       </div>
 
-      <ContentSection title="Project Context">
-        <dl className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
-          <Field label="Epic" value={epic?.name ?? "–"} />
-          <Field label="Department" value={department?.name ?? "–"} />
-          <Field
-            label="Department Head"
-            value={
-              <div className="space-y-1">
-                <p>{departmentHead?.name ?? "Unassigned"}</p>
-                <p className="text-xs text-muted-foreground">
-                  Snapshot at project creation, may differ from the department&apos;s current
-                  head.
-                </p>
-              </div>
-            }
-          />
-          <Field
-            label="Product Owners"
-            value={
-              productOwners.length ? productOwners.map((s) => s.name).join(", ") : "None"
-            }
-          />
-          <Field
-            label="Project Admin / PIC"
-            value={
-              projectAdmins.length ? projectAdmins.map((s) => s.name).join(", ") : "None"
-            }
-          />
-        </dl>
-      </ContentSection>
+      <ContentSection>
+        <div className="space-y-5">
+          <h2 className="text-sm font-semibold text-foreground">Overview</h2>
+          <dl className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
+            <Field label="Epic" value={epic?.name ?? "Not set"} />
+            <Field label="Department" value={department?.name ?? "Not set"} />
+            <Field
+              label="Product Owner"
+              value={productOwners.length ? productOwners.map((s) => s.name).join(", ") : "Not assigned"}
+            />
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1">
+                  Department Head
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<button type="button" className="text-muted-foreground/70 hover:text-muted-foreground" />}
+                    >
+                      <Info className="size-3.5" />
+                      <span className="sr-only">About Department Head</span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs">
+                      Snapshot at project creation — may differ from the department&apos;s current head.
+                    </TooltipContent>
+                  </Tooltip>
+                </span>
+              }
+              value={departmentHead?.name ?? "Not assigned"}
+            />
+            <Field
+              label="Project Admin / PIC"
+              value={projectAdmins.length ? projectAdmins.map((s) => s.name).join(", ") : "Not assigned"}
+            />
+          </dl>
+        </div>
 
-      <ContentSection title="Design Ownership">
-        <dl className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
-          <Field label="Owner Squad" value={ownerSquad?.name ?? "–"} />
-          <Field label="Squad Lead" value={squadLead?.name ?? "Unassigned"} />
-          <Field
-            label="Project Design Lead"
-            value={
-              projectLead ? (
-                <PersonInline
-                  designer={projectLead}
-                  crossSquad={isCrossSquadAssignment(project, projectLead)}
-                />
-              ) : (
-                "Unassigned"
-              )
-            }
-          />
-        </dl>
+        <Separator className="my-6" />
 
-        <Separator className="my-5" />
+        <div className="space-y-5">
+          <h2 className="text-sm font-semibold text-foreground">Design Team</h2>
+          <dl className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
+            <Field label="Owner Squad" value={ownerSquad?.name ?? "Not set"} />
+            <Field
+              label="Squad Lead"
+              value={
+                squadLead ? (
+                  <span className="inline-flex items-center gap-2">
+                    <PersonAvatar person={squadLead} size="sm" />
+                    {squadLead.name}
+                  </span>
+                ) : (
+                  "Not assigned"
+                )
+              }
+            />
+            <Field
+              label="Design Lead"
+              value={
+                projectLead ? (
+                  <PersonInline
+                    designer={projectLead}
+                    crossSquad={isCrossSquadAssignment(project, projectLead)}
+                  />
+                ) : (
+                  <AssignLeadControl
+                    projectId={project.id}
+                    lead={undefined}
+                    designers={designers}
+                    onAssigned={load}
+                  />
+                )
+              }
+            />
+          </dl>
 
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground">Supporting Designers</p>
-          {supportDesigners.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No supporting designers assigned.</p>
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">Supporting Designers</p>
+            {supportDesigners.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No supporting designers assigned.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {supportDesigners.map((designer) => (
+                  <li key={designer.id} className="flex flex-wrap items-center gap-2">
+                    <PersonAvatar person={designer} size="sm" />
+                    <span className="text-sm font-medium text-foreground">{designer.name}</span>
+                    <span className="text-xs text-muted-foreground">{designer.job_title}</span>
+                    {isCrossSquadAssignment(project, designer) ? (
+                      <Badge variant="outline" className="text-xs">
+                        Cross-squad
+                      </Badge>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Link
+              href={`/projects/${project.id}/edit`}
+              className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+            >
+              <Plus className="size-3.5" />
+              Add designer
+            </Link>
+          </div>
+        </div>
+
+        <Separator className="my-6" />
+
+        <div className="space-y-5">
+          <h2 className="text-sm font-semibold text-foreground">Timeline & Monthly Targets</h2>
+          {monthlyTargets.length === 0 ? (
+            <EmptyState
+              title="No monthly targets yet"
+              description="Break the project timeline into monthly outcomes so the team can see what is expected each month."
+              action={
+                <Button variant="outline" render={<Link href={`/projects/${project.id}/edit`} />} nativeButton={false}>
+                  <Plus />
+                  Add monthly target
+                </Button>
+              }
+            />
           ) : (
-            <ul className="space-y-2.5">
-              {supportDesigners.map((designer) => (
-                <li key={designer.id} className="flex flex-wrap items-center gap-2">
-                  <PersonAvatar person={designer} size="sm" />
-                  <span className="text-sm font-medium text-foreground">{designer.name}</span>
-                  <span className="text-xs text-muted-foreground">{designer.job_title}</span>
-                  {isCrossSquadAssignment(project, designer) ? (
-                    <Badge variant="outline" className="text-xs">
-                      Cross-squad
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {monthlyTargets.map((target) => (
+                <div
+                  key={target.id}
+                  className="w-44 shrink-0 space-y-2 rounded-md border border-border p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">{formatMonth(target.month)}</p>
+                    <Badge variant="outline" className="shrink-0">
+                      {target.phase}
                     </Badge>
-                  ) : null}
-                </li>
+                  </div>
+                  <div className="h-1 rounded-full bg-primary/60" />
+                  <p className="text-xs whitespace-normal text-muted-foreground">{target.target}</p>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </div>
-      </ContentSection>
 
-      <ContentSection
-        title="Timeline & Monthly Targets"
-        bodyClassName={monthlyTargets.length ? "p-0" : undefined}
-      >
-        {monthlyTargets.length === 0 ? (
-          <EmptyState title="No monthly targets recorded yet" />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Month</TableHead>
-                <TableHead>Phase</TableHead>
-                <TableHead>Target</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {monthlyTargets.map((target) => (
-                <TableRow key={target.id}>
-                  <TableCell className="font-medium text-foreground">
-                    {formatMonth(target.month)}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{target.phase}</Badge>
-                  </TableCell>
-                  <TableCell className="whitespace-normal text-muted-foreground">
-                    {target.target}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </ContentSection>
-
-      {weeklyPlan.length > 0 ? (
-        <ContentSection
-          title="Weekly Plan"
-          description="Secondary to the timeline above: what this project is focusing on week by week."
-        >
-          <div className="space-y-5">
-            {weeklyPlan.map((group) => (
-              <div key={group.month} className="space-y-3">
-                <p className="text-xs font-semibold text-muted-foreground">{formatMonthFull(group.month)}</p>
-                <div className="space-y-3">
-                  {group.weeks.map(({ week, items }) => (
-                    <div key={week}>
-                      <p className="text-sm font-medium text-foreground">{formatWeekRangeLabel(week)}</p>
-                      {phaseByMonth.get(monthOfWeek(week)) ? (
-                        <p className="text-xs text-muted-foreground">{phaseByMonth.get(monthOfWeek(week))}</p>
-                      ) : null}
-                      <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-muted-foreground">
-                        {items.map((item) => (
-                          <li key={item.id}>{item.title}</li>
-                        ))}
-                      </ul>
+        {weeklyPlan.length > 0 ? (
+          <>
+            <Separator className="my-6" />
+            <div className="space-y-5">
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold text-foreground">Weekly Plan</h2>
+                <p className="text-xs text-muted-foreground">
+                  Secondary to the timeline above: what this project is focusing on week by week.
+                </p>
+              </div>
+              <div className="space-y-5">
+                {weeklyPlan.map((group) => (
+                  <div key={group.month} className="space-y-3">
+                    <p className="text-xs font-semibold text-muted-foreground">{formatMonthFull(group.month)}</p>
+                    <div className="space-y-3">
+                      {group.weeks.map(({ week, items }) => (
+                        <div key={week}>
+                          <p className="text-sm font-medium text-foreground">{formatWeekRangeLabel(week)}</p>
+                          {phaseByMonth.get(monthOfWeek(week)) ? (
+                            <p className="text-xs text-muted-foreground">{phaseByMonth.get(monthOfWeek(week))}</p>
+                          ) : null}
+                          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-muted-foreground">
+                            {items.map((item) => (
+                              <li key={item.id}>{item.title}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </ContentSection>
-      ) : null}
-
-      <ContentSection title="Metadata">
-        <dl className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
-          <Field label="Created" value={formatDate(project.created_at)} />
-          <Field
-            label="Updated"
-            value={
-              <div className="flex flex-wrap items-center gap-2">
-                <span>
-                  Updated {formatRelativeTime(project.updated_at)}
-                  <span className="text-muted-foreground"> · {formatDate(project.updated_at)}</span>
-                </span>
-                {flagReview ? <Badge variant="outline">Needs review</Badge> : null}
-              </div>
-            }
-          />
-        </dl>
+            </div>
+          </>
+        ) : null}
       </ContentSection>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+        <p className="font-medium text-foreground/70">Project Details</p>
+        <span>Created {formatDate(project.created_at)}</span>
+        <span>
+          Last updated {formatRelativeTime(project.updated_at)} · {formatDate(project.updated_at)}
+        </span>
+        {flagReview ? (
+          <Badge variant="outline" className="text-xs">
+            Needs review
+          </Badge>
+        ) : null}
+      </div>
+
+      <MarkCompleteDialog
+        open={markCompleteOpen}
+        onOpenChange={setMarkCompleteOpen}
+        project={project}
+        onCompleted={applyUpdate}
+      />
+
+      <ConfirmDialog
+        open={archiveConfirmOpen}
+        onOpenChange={setArchiveConfirmOpen}
+        title="Archive this project?"
+        description="It will be removed from Overview and Timeline, but stays fully accessible from the Projects page. This can be undone at any time."
+        confirmLabel="Archive"
+        onConfirm={handleArchiveConfirm}
+      />
+
+      <ConfirmDialog
+        open={cancelConfirmOpen}
+        onOpenChange={setCancelConfirmOpen}
+        title="Cancel this project?"
+        description="Its status becomes Cancelled. Timeline, assignments, and monthly targets are all preserved — this can be reopened later."
+        confirmLabel="Cancel project"
+        confirmVariant="destructive"
+        onConfirm={handleCancelConfirm}
+      />
+
+      <DeleteEntityDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        entityLabel="project"
+        entityName={project.name}
+        blockers={[]}
+        onConfirm={handleDeleteConfirm}
+      />
     </div>
   )
 }
