@@ -2,6 +2,29 @@
 
 This file records important product or architecture decisions and their rationale.
 
+## The shadcn sidebar is installed but the shell still owns its own sidebar
+
+`pnpm dlx shadcn@latest add sidebar` added `src/components/ui/sidebar.tsx`,
+`sheet.tsx`, `skeleton.tsx` and `src/hooks/use-mobile.ts`. `AppShell` uses none
+of them, and that is the decision, not an oversight.
+
+The shadcn parts are not separable. `SidebarMenuButton` calls `useSidebar()`
+unconditionally, so it throws outside a `SidebarProvider` — adopting it for the
+footer alone would mean wrapping the whole shell in that provider, inheriting
+its cookie-backed collapse state, its `--sidebar-width` variables and its mobile
+`Sheet`, and then fighting all of it to keep the rail the app already has.
+That is a full sidebar migration, which is exactly what was out of scope.
+
+What was taken is the *pattern*, not the code: the footer is now one account row
+— avatar, name, email, chevron — whose menu holds the account's own
+destinations, which is shadcn's `NavUser`. It is built from the `Button`,
+`DropdownMenu` and `Avatar` primitives the shell already used, so the change is
+a rewritten `AccountMenu` and a deleted nav row rather than a new dependency.
+
+The four installed files are kept as the starting point if the shell is ever
+migrated wholesale. They are dead code until then; deleting them costs one
+command to get back.
+
 ## One `profiles` table, not a second people model
 
 The obvious ways to give an account an identity were both wrong. Putting the

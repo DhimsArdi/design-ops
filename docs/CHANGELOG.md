@@ -4,6 +4,13 @@ This file records meaningful product requirement changes.
 
 Do not use this file for minor visual polish, refactoring, or implementation-only changes.
 
+## 2026-09-13 — The account menu is the only door to Settings
+
+- **The `Settings` nav row is gone from the sidebar footer** (`docs/PRD.MD` §7). Settings and the account were two rows one centimetre apart answering the same question — "this is about me, not about the work". The footer is now a single account row, and Settings lives inside the menu it opens.
+- **The account menu lists the three Settings pages directly**: `General`, `Profile`, `Security`, in the same order as the Settings page's own rail, followed by `Sign out`. They link to the pages themselves rather than to `/settings`, which only ever redirected to `/settings/general` — the removed row was a detour past the page it landed on.
+- **The account row now looks like the control it is.** Avatar, name, email, and a chevron; it takes the same active treatment as a nav item while you are anywhere under `/settings`, and marks which Settings page you are on inside the menu. This replaces the earlier rule that Settings was deliberately *not* repeated in the account menu — that rule existed to avoid two routes to one page, and with the row removed there is only one.
+- **Nothing else in the sidebar changed.** Planning and Administration, their counts, the collapse behaviour and the header title resolution are untouched; `/settings` remains a valid route.
+
 ## 2026-09-13 — Accounts become people: Settings, a profile, and password recovery
 
 - **A signed-in user is now somebody** (`docs/PRD.MD` §6.1, §8.10). An account used to be an access token with an email attached — the app knew nothing else about whoever was using it. Every account now has a profile: a name, a job title, a design role, and its own preferences. One new table, `profiles`, keyed by the Supabase Auth user id.

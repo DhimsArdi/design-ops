@@ -15,6 +15,8 @@ import {
   PanelLeftOpen,
   LogOut,
   UserRound,
+  ShieldCheck,
+  ChevronsUpDown,
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -26,6 +28,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel as DropdownMenuGroupLabel,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -61,13 +65,22 @@ const PLANNING_ITEMS: NavItem[] = [
 ]
 const ADMIN_ITEMS: NavItem[] = [{ label: "Master Data", href: "/master-data", icon: Database }]
 
-// Settings sits in the footer strip with the account, not in either group
-// above: it configures the person using the app, not the work the app is about,
-// and putting a gear between Timeline and Projects would make five workflow
-// destinations look like six (docs/PRD.MD §7 — Settings is utility navigation).
-// It is deliberately the only entry there, rather than being repeated inside
-// the account menu as well.
+// Settings is reachable only through the account menu below, not as a nav row
+// of its own: it configures the person using the app, not the work the app is
+// about, and a gear between Timeline and Projects would make five workflow
+// destinations look like six (docs/PRD.MD §7 — Settings is utility
+// navigation). This list is therefore title resolution only — the footer
+// renders an account row, not a NavGroup.
 const UTILITY_ITEMS: NavItem[] = [{ label: "Settings", href: "/settings", icon: Settings }]
+
+// The three Settings pages, as the account menu lists them. Same order and
+// labels as SettingsNav (src/app/settings/_components/settings-nav.tsx) so the
+// menu and the page's own rail don't disagree about what lives where.
+const ACCOUNT_ITEMS: NavItem[] = [
+  { label: "General", href: "/settings/general", icon: Settings },
+  { label: "Profile", href: "/settings/profile", icon: UserRound },
+  { label: "Security", href: "/settings/security", icon: ShieldCheck },
+]
 
 // Every destination, for resolving the header title — not a render list.
 const NAV_ITEMS: NavItem[] = [...PLANNING_ITEMS, ...ADMIN_ITEMS, ...UTILITY_ITEMS]
@@ -188,14 +201,8 @@ function AppShell({ children }: { children: ReactNode }) {
           </nav>
         </ScrollArea>
         <Separator className="bg-sidebar-border/60" />
-        <div className="flex flex-col gap-0.5 p-2">
-          <NavGroup
-            items={UTILITY_ITEMS}
-            pathname={pathname}
-            collapsed={collapsed}
-            counts={counts}
-          />
-          <AccountMenu collapsed={collapsed} />
+        <div className="p-2">
+          <AccountMenu collapsed={collapsed} pathname={pathname} />
         </div>
       </aside>
 
@@ -214,20 +221,29 @@ function AppShell({ children }: { children: ReactNode }) {
 }
 
 /**
- * Who you're signed in as, and what you can do about it (docs/PRD.MD §14.10).
+ * Who you're signed in as, and everything you can do about it (docs/PRD.MD
+ * §14.10) — the shadcn sidebar's account row, adapted to this shell.
  *
- * Was a bare email and a Sign out button. Now that an account has a name and a
- * profile, it is the identity: initials, name, email, and a menu. Settings is
- * NOT repeated in that menu — it is the row directly above this one, and two
- * routes to the same page one centimetre apart is a menu that has stopped
- * meaning anything.
+ * It is the whole footer strip now: Settings used to sit above it as a nav row
+ * of its own, which meant the gear and the account were two neighbouring
+ * answers to the same question. Folding the three Settings pages into this menu
+ * leaves the sidebar with workflow destinations above and one account row
+ * below, and costs nothing — /settings only ever redirected to
+ * /settings/general, so the row was a detour past the page it lands on.
+ *
+ * The chevron is what says "this opens something" now that the row is the only
+ * thing down here; without it a name and an email read as a label.
  */
-function AccountMenu({ collapsed }: { collapsed: boolean }) {
+function AccountMenu({ collapsed, pathname }: { collapsed: boolean; pathname: string }) {
   const currentUser = useCurrentUser()
 
   const name = currentUser?.displayName ?? ""
   const email = currentUser?.email ?? ""
   const initials = initialsFromName(name || email)
+  // Wayfinding the removed Settings row used to carry: on any Settings page the
+  // account row takes the same active treatment as a nav item, so the sidebar
+  // still shows where you are.
+  const active = isNavItemActive(pathname, "/settings")
 
   const trigger = (
     <Button
@@ -235,24 +251,29 @@ function AccountMenu({ collapsed }: { collapsed: boolean }) {
       size={collapsed ? "icon" : "md"}
       aria-label={collapsed ? `Account: ${name || email}` : undefined}
       className={cn(
-        "text-sidebar-foreground/70 hover:bg-foreground/8 hover:text-sidebar-foreground",
-        collapsed ? "mx-auto" : "w-full justify-start gap-2 px-2"
+        active
+          ? "bg-background text-foreground shadow-xs"
+          : "text-sidebar-foreground/70 hover:bg-foreground/8 hover:text-sidebar-foreground",
+        collapsed ? "mx-auto" : "h-12 w-full justify-start gap-2 px-2"
       )}
     >
       <Avatar size="sm" aria-hidden>
         <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
       </Avatar>
       {!collapsed ? (
-        <span className="flex min-w-0 flex-1 flex-col items-start">
-          <span className="w-full truncate text-left text-sm font-medium text-sidebar-foreground">
-            {name || email}
-          </span>
-          {name && email ? (
-            <span className="w-full truncate text-left text-xs font-normal text-sidebar-foreground/45">
-              {email}
+        <>
+          <span className="flex min-w-0 flex-1 flex-col items-start">
+            <span className="w-full truncate text-left text-sm font-medium text-sidebar-foreground">
+              {name || email}
             </span>
-          ) : null}
-        </span>
+            {name && email ? (
+              <span className="w-full truncate text-left text-xs font-normal text-sidebar-foreground/45">
+                {email}
+              </span>
+            ) : null}
+          </span>
+          <ChevronsUpDown className="size-4 shrink-0 text-sidebar-foreground/40" />
+        </>
       ) : null}
     </Button>
   )
@@ -263,24 +284,47 @@ function AccountMenu({ collapsed }: { collapsed: boolean }) {
           those are links that go somewhere unannounced, while this opens a menu
           whose first line is the name and email the tooltip would have shown. */}
       <DropdownMenuTrigger render={trigger} />
-      <DropdownMenuContent align="start" side="top" className="w-56">
+      {/* Opens beside the sidebar rather than over it, so the row you clicked
+          stays visible — and so the menu is in the same place whether the
+          sidebar is collapsed or not. */}
+      <DropdownMenuContent align="end" side="right" className="w-60">
         {/* A plain header, not DropdownMenuLabel: that primitive is Base UI's
             Menu.GroupLabel and throws unless it sits inside a Menu.Group. It
             would be the wrong element anyway — this names the account, it does
             not label a group of items below it. */}
-        <div className="px-2 py-1.5">
-          <span className="block truncate text-sm font-medium text-foreground">
-            {name || email}
+        <div className="flex items-center gap-2 px-2 py-1.5">
+          <Avatar size="sm" aria-hidden>
+            <AvatarFallback className="text-[10px]">{initials}</AvatarFallback>
+          </Avatar>
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-sm font-medium text-foreground">{name || email}</span>
+            {name && email ? (
+              <span className="truncate text-xs text-muted-foreground">{email}</span>
+            ) : null}
           </span>
-          {name && email ? (
-            <span className="block truncate text-xs text-muted-foreground">{email}</span>
-          ) : null}
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem render={<Link href="/settings/profile" />}>
-          <UserRound />
-          Profile
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuGroupLabel>Settings</DropdownMenuGroupLabel>
+          {ACCOUNT_ITEMS.map((item) => {
+            const Icon = item.icon
+            return (
+              <DropdownMenuItem
+                key={item.href}
+                render={<Link href={item.href} />}
+                // Marks the Settings page you are already on. A plain class
+                // rather than a data attribute: Base UI owns this element's
+                // data-* namespace, and this only ever needs to be a colour.
+                className={cn(
+                  isNavItemActive(pathname, item.href) && "bg-accent text-accent-foreground"
+                )}
+              >
+                <Icon />
+                {item.label}
+              </DropdownMenuItem>
+            )
+          })}
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => void supabase.auth.signOut()}>
           <LogOut />

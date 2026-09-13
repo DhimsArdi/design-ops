@@ -323,11 +323,12 @@ Master Data
 Utility navigation:
 
 ```text
-Settings
 Account menu
 ```
 
-Settings dan akun tinggal di footer sidebar, terpisah dari enam destinasi kerja di atas — mereka mengatur orang yang memakai aplikasi, bukan pekerjaan yang diatur aplikasi.
+Footer sidebar berisi satu baris: akun. Ia terpisah dari enam destinasi kerja di atas karena mengatur orang yang memakai aplikasi, bukan pekerjaan yang diatur aplikasi.
+
+Baris itu menampilkan avatar, nama, email, dan chevron yang menandakan ia membuka menu — bukan link. Saat sidebar collapsed, hanya avatar yang tersisa.
 
 Settings punya sub-navigasi sendiri (§14.10):
 
@@ -338,7 +339,9 @@ Settings punya sub-navigasi sendiri (§14.10):
 /settings/security
 ```
 
-Account menu berisi `Profile` dan `Sign out`. Settings sengaja tidak diulang di dalamnya — barisnya persis di atas menu itu.
+Account menu adalah satu-satunya pintu ke Settings. Isinya: header akun (nama + email), lalu ketiga halaman Settings — `General`, `Profile`, `Security` — lalu `Sign out`. Ketiganya menunjuk langsung ke halamannya, bukan ke `/settings`, yang memang hanya me-redirect.
+
+Selama user berada di salah satu halaman Settings, baris akun memakai state aktif yang sama dengan nav item lain, dan halaman yang sedang dibuka ditandai di dalam menu.
 
 ---
 
