@@ -185,13 +185,15 @@
   }
   body {
     /* This shell never scrolls the page itself (AppShell is a fixed-height
-       h-svh layout; every screen scrolls inside its own container) — so a
-       wide-content view (Squad View's kanban, Timeline's chart) overflowing
-       sideways should never surface as a page-level horizontal scrollbar. */
-    @apply bg-background text-foreground overflow-x-hidden;
+       h-svh layout; every screen scrolls inside its own container) — so
+       nothing (a wide Squad View kanban, or a tall form whose measurement/
+       positioning nodes lay out beyond the h-svh box before settling) should
+       ever surface as a page-level scrollbar in either direction. Only main's
+       own overflow-y is meant to move. */
+    @apply bg-background text-foreground overflow-hidden;
   }
   html {
-    @apply font-sans;
+    @apply font-sans overflow-hidden;
   }
 }
 

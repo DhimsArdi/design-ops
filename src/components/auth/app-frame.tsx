@@ -20,7 +20,7 @@ import { DataProvider } from "./data-provider"
 import { AppShell } from "@/components/shell/AppShell"
 
 /** Reachable without a session. Both are part of the sign-in flow, not the app. */
-const PUBLIC_ROUTES = ["/forgot-password", "/reset-password", "/repro"]
+const PUBLIC_ROUTES = ["/forgot-password", "/reset-password"]
 
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname()

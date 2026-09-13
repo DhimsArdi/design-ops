@@ -378,12 +378,7 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
   }
 
   return (
-    // -mb-6 lives on this static wrapper, not on the sticky footer below: a
-    // sticky element with its own negative bottom margin gets its scrollable
-    // overflow miscomputed in Chromium, which let this page be scrolled well
-    // past its actual content. A plain block's negative margin doesn't have
-    // that failure mode, so the bottom-padding cancellation happens here.
-    <div className="-mb-6 space-y-6">
+    <div className="space-y-6">
       <PageHeader
         title={mode === "create" ? "Add Project" : `Edit ${originalProject?.name ?? "Project"}`}
         description={
@@ -466,7 +461,7 @@ function ProjectFormWizard({ mode, projectId }: ProjectFormWizardProps) {
           something you scroll to find. Bleeds through the page padding so the
           rule spans the full width. Cancel is not repeated here — it is in the
           page header (PRD §29). */}
-      <div className="sticky bottom-0 z-10 -mx-6 border-t border-border bg-card px-6 py-3.5">
+      <div className="sticky bottom-0 z-10 -mx-6 -mb-6 border-t border-border bg-card px-6 py-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             {step > 1 ? (
