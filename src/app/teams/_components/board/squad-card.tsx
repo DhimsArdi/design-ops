@@ -38,6 +38,7 @@ interface SquadCardProps {
   matchingDesignerIds: Set<string>
   onOpenDesigner: (designerId: string) => void
   onAddDesigners: () => void
+  onRemoveDesigner: (designer: Designer, isShared: boolean) => void
 }
 
 function SquadCard({
@@ -49,6 +50,7 @@ function SquadCard({
   matchingDesignerIds,
   onOpenDesigner,
   onAddDesigners,
+  onRemoveDesigner,
 }: SquadCardProps) {
   const { setNodeRef, isOver } = useDroppable({ id: squad.id })
 
@@ -128,6 +130,7 @@ function SquadCard({
                 currentDesignerId={currentDesignerId}
                 isMatch={matchingDesignerIds.has(designer.id)}
                 onOpenDetails={() => onOpenDesigner(designer.id)}
+                onRemove={() => onRemoveDesigner(designer, isShared)}
               />
             ))
           )}

@@ -84,8 +84,8 @@ function loadPersonDetail(designerId: string): PersonDetailData | null {
 
   return {
     designer,
-    homeSquad: squadRepository.getById(designer.home_squad_id),
-    squadLead: getSquadLead(designer.home_squad_id),
+    homeSquad: designer.home_squad_id ? squadRepository.getById(designer.home_squad_id) : undefined,
+    squadLead: designer.home_squad_id ? getSquadLead(designer.home_squad_id) : undefined,
     currentProjects,
   }
 }
@@ -263,7 +263,7 @@ export function PersonDetailView({ designerId }: PersonDetailViewProps) {
 
       <ContentSection title="Overview">
         <dl className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
-          <Field label="Home Squad" value={homeSquad?.name ?? "–"} />
+          <Field label="Home Squad" value={homeSquad?.name ?? "Unassigned"} />
           <Field label="Squad Lead" value={squadLead?.name ?? "Unassigned"} />
         </dl>
       </ContentSection>

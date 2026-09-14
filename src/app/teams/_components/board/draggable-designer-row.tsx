@@ -7,9 +7,10 @@
 
 import { useDraggable } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
-import { GripVertical } from "lucide-react"
+import { GripVertical, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { PersonAvatar } from "@/components/shared/person-avatar"
 import { EntityStatusBadge } from "@/components/shared/entity-status-badge"
 import { personDisplayName } from "@/lib/identity/person-display"
@@ -26,6 +27,7 @@ interface DraggableDesignerRowProps {
   /** True when this designer matches an active search query (highlighted). */
   isMatch?: boolean
   onOpenDetails: () => void
+  onRemove: () => void
 }
 
 function DraggableDesignerRow({
@@ -35,6 +37,7 @@ function DraggableDesignerRow({
   currentDesignerId,
   isMatch = false,
   onOpenDetails,
+  onRemove,
 }: DraggableDesignerRowProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `${squadId}::${designer.id}`,
@@ -80,6 +83,20 @@ function DraggableDesignerRow({
           Shared
         </Badge>
       ) : null}
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={(event) => {
+          event.stopPropagation()
+          onRemove()
+        }}
+        className="shrink-0 text-muted-foreground/50 opacity-0 transition-opacity duration-(--duration-quick) group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100"
+      >
+        <X className="size-3.5" />
+        <span className="sr-only">Remove {designer.name} from this squad</span>
+      </Button>
     </div>
   )
 }

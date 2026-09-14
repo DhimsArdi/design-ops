@@ -48,7 +48,7 @@ export function getDesignerSquadMemberships(
   if (!designer) return [];
 
   const memberships: { squad: Squad; type: "primary" | "shared" }[] = [];
-  const home = squadRepository.getById(designer.home_squad_id);
+  const home = designer.home_squad_id ? squadRepository.getById(designer.home_squad_id) : undefined;
   if (home) memberships.push({ squad: home, type: "primary" });
 
   for (const row of squadDesignerMembershipRepository.getAll()) {

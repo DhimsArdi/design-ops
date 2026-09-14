@@ -32,7 +32,10 @@ create table public.designers (
   seniority     text not null check (seniority in ('Junior', 'Mid', 'Senior')),
   -- restrict (the default): a squad still housing designers can't be deleted.
   -- The app already refuses this via getSquadUsage; this is the backstop.
-  home_squad_id uuid not null references public.squads (id),
+  -- Nullable — a designer can be removed from their squad (Teams → Squad
+  -- View, Master Data → Squads) and left "Unassigned" rather than forced
+  -- to move straight to another one.
+  home_squad_id uuid references public.squads (id),
   -- Initials or an image URL — no upload flow, just a display value (PRD §8.1).
   avatar        text not null default '',
   status        text not null check (status in ('Active', 'Inactive'))

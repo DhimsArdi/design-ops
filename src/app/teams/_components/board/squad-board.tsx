@@ -8,18 +8,28 @@
 
 import { useMemo, useState } from "react"
 import { DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core"
+import { toast } from "sonner"
 
 import { SquadCard, type SquadCardMember } from "./squad-card"
 import { DesignerAllocationDialog, type AllocationRequest } from "./designer-allocation-dialog"
 import { DesignerDetailsSheet } from "./designer-details-sheet"
 import { AddSquadMembersDialog } from "@/components/shared/add-squad-members-dialog"
+import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 
 import { useRepositoryList } from "@/lib/hooks/use-repository-list"
+import * as designerRepository from "@/lib/repositories/designerRepository"
+import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as squadDesignerMembershipRepository from "@/lib/repositories/squadDesignerMembershipRepository"
 import { getSquadOwnedProjects } from "@/lib/selectors/squadSelectors"
 import { useCurrentDesignerId } from "@/lib/identity/current-user"
 import { byName } from "@/lib/domain/optionHelpers"
 import type { Designer, Squad } from "@/lib/domain/types"
+
+interface RemovalRequest {
+  designer: Designer
+  squad: Squad
+  isShared: boolean
+}
 
 interface SquadBoardProps {
   /** Already filtered by status/staffing/lead/search — see Teams page. */
@@ -41,6 +51,7 @@ function SquadBoard({ squads, designers, searchQuery }: SquadBoardProps) {
   const [allocationRequest, setAllocationRequest] = useState<AllocationRequest | null>(null)
   const [detailsDesignerId, setDetailsDesignerId] = useState<string | null>(null)
   const [addDesignersTarget, setAddDesignersTarget] = useState<Squad | null>(null)
+  const [removalRequest, setRemovalRequest] = useState<RemovalRequest | null>(null)
 
   const designersById = useMemo(() => new Map(designers.map((d) => [d.id, d])), [designers])
 
@@ -104,7 +115,23 @@ function SquadBoard({ squads, designers, searchQuery }: SquadBoardProps) {
     const alreadyShared = sharedDesignerIdsBySquad.get(targetSquadId)?.has(designer.id) ?? false
     if (designer.home_squad_id === targetSquadId || alreadyShared) return
 
-    setAllocationRequest({ designer, targetSquad })
+    setAllocationRequest({ designer, targetSquad, sourceSquadId: data.sourceSquadId })
+  }
+
+  function confirmRemove() {
+    if (!removalRequest) return
+    const { designer, squad, isShared } = removalRequest
+
+    if (isShared) {
+      squadDesignerMembershipRepository.removeMembership(designer.id, squad.id)
+    } else {
+      if (squad.lead_designer_id === designer.id) {
+        squadRepository.update(squad.id, { lead_designer_id: null })
+      }
+      designerRepository.update(designer.id, { home_squad_id: null })
+    }
+
+    toast.success(`${designer.name} removed from ${squad.name}`)
   }
 
   return (
@@ -124,6 +151,7 @@ function SquadBoard({ squads, designers, searchQuery }: SquadBoardProps) {
               matchingDesignerIds={matchingDesignerIds}
               onOpenDesigner={setDetailsDesignerId}
               onAddDesigners={() => setAddDesignersTarget(squad)}
+              onRemoveDesigner={(designer, isShared) => setRemovalRequest({ designer, squad, isShared })}
             />
           ))}
         </div>
@@ -153,6 +181,24 @@ function SquadBoard({ squads, designers, searchQuery }: SquadBoardProps) {
           designers={designers}
           squads={squads}
           onAdded={() => setAddDesignersTarget(null)}
+        />
+      ) : null}
+
+      {removalRequest ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setRemovalRequest(null)
+          }}
+          title={`Remove ${removalRequest.designer.name} from ${removalRequest.squad.name}?`}
+          description={
+            removalRequest.isShared
+              ? `${removalRequest.designer.name} stays in their Home Squad — this only ends the Shared membership with ${removalRequest.squad.name}.`
+              : `${removalRequest.squad.name} is ${removalRequest.designer.name}'s Home Squad. Removing them here leaves them Unassigned until you give them a new one.`
+          }
+          confirmLabel="Remove"
+          confirmVariant="destructive"
+          onConfirm={confirmRemove}
         />
       ) : null}
     </>

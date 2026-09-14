@@ -106,7 +106,7 @@ export default function PeoplePage() {
       }
 
       if (trimmedQuery) {
-        const squad = squadsById.get(designer.home_squad_id)
+        const squad = squadsById.get(designer.home_squad_id ?? "")
         const matchesSearch =
           designer.name.toLowerCase().includes(trimmedQuery) ||
           designer.job_title.toLowerCase().includes(trimmedQuery) ||
@@ -165,7 +165,7 @@ export default function PeoplePage() {
         header: "Home Squad",
         cell: (designer) => (
           <span className="text-muted-foreground">
-            {squadsById.get(designer.home_squad_id)?.name ?? "–"}
+            {squadsById.get(designer.home_squad_id ?? "")?.name ?? "Unassigned"}
           </span>
         ),
       },

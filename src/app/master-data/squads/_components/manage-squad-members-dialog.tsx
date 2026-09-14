@@ -9,10 +9,10 @@
 // table, the Designers page, Teams, People and Overview all re-render from the
 // same cache without being told (PRD §16).
 //
-// Three views, one Dialog. Moving a member and adding members are steps, not
-// second modals: a dialog stacked on a dialog would mean two focus traps and
-// two ways out of one decision, and the member list is what you come back to
-// afterwards either way.
+// Several views, one Dialog. Moving, removing, and adding members are all
+// steps, not second modals: a dialog stacked on a dialog would mean two focus
+// traps and two ways out of one decision, and the member list is what you
+// come back to afterwards either way.
 
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -106,6 +106,7 @@ function ManageSquadMembersContent({
   const [addingMembers, setAddingMembers] = useState(false)
   const [movingMember, setMovingMember] = useState<Designer | null>(null)
   const [destinationId, setDestinationId] = useState("")
+  const [removingMember, setRemovingMember] = useState<Designer | null>(null)
 
   // Derived from the live designer list, so a move made in this dialog drops
   // the row out of it on the next render.
@@ -121,6 +122,7 @@ function ManageSquadMembersContent({
 
   const leadId = squad.lead_designer_id
   const movingMemberIsLead = movingMember !== null && movingMember.id === leadId
+  const removingMemberIsLead = removingMember !== null && removingMember.id === leadId
 
   function startMove(member: Designer) {
     setMovingMember(member)
@@ -155,6 +157,18 @@ function ManageSquadMembersContent({
     toast.success(`${squad.name} now has no Squad Lead`)
   }
 
+  function handleRemove() {
+    if (!removingMember) return
+    if (removingMember.id === squad.lead_designer_id) {
+      squadRepository.update(squad.id, { lead_designer_id: null })
+    }
+    designerRepository.update(removingMember.id, { home_squad_id: null })
+    toast.success(`${removingMember.name} removed from ${squad.name}`, {
+      description: `${removingMember.name} is now Unassigned.`,
+    })
+    setRemovingMember(null)
+  }
+
   if (addingMembers) {
     return (
       <AddSquadMembersPanel
@@ -168,7 +182,33 @@ function ManageSquadMembersContent({
     )
   }
 
-  return movingMember ? (
+  return removingMember ? (
+    <>
+      <DialogHeader>
+        <DialogTitle>Remove {removingMember.name} from {squad.name}?</DialogTitle>
+        <DialogDescription>
+          {removingMember.name} will no longer belong to any squad until you give them a new
+          Home Squad — in this dialog, in Master Data → Designers, or from Teams → Squad View.
+        </DialogDescription>
+      </DialogHeader>
+
+      {removingMemberIsLead ? (
+        <p className="rounded-md border border-status-warning/30 bg-status-warning/10 p-3 text-sm text-status-warning">
+          {removingMember.name} is {squad.name}&apos;s Squad Lead. Removing them leaves {squad.name}{" "}
+          without a lead until you assign another.
+        </p>
+      ) : null}
+
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={() => setRemovingMember(null)}>
+          Cancel
+        </Button>
+        <Button type="button" variant="destructive" onClick={handleRemove}>
+          Remove
+        </Button>
+      </DialogFooter>
+    </>
+  ) : movingMember ? (
     <>
       <DialogHeader>
         <DialogTitle>Move {movingMember.name}</DialogTitle>
@@ -276,6 +316,9 @@ function ManageSquadMembersContent({
                         onClick={() => startMove(member)}
                       >
                         Move to another squad
+                      </DropdownMenuItem>
+                      <DropdownMenuItem variant="destructive" onClick={() => setRemovingMember(member)}>
+                        Remove from squad
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

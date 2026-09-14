@@ -129,7 +129,7 @@ function DesignerDetailsContent({ designerId }: { designerId: string }) {
           <div>
             <p className="text-xs font-medium text-muted-foreground">Primary Squad</p>
             <p className="text-sm text-foreground">
-              {squadsById.get(designer.home_squad_id)?.name ?? "Not set"}
+              {squadsById.get(designer.home_squad_id ?? "")?.name ?? "Unassigned"}
             </p>
           </div>
           <div className="grid grid-cols-3 gap-2">

@@ -59,11 +59,11 @@ import { activeOrSelected, byName } from "@/lib/domain/optionHelpers"
 import { SENIORITIES, type Seniority } from "@/lib/domain/enums"
 import type { Designer } from "@/lib/domain/types"
 
-// Sentinel for "nothing chosen yet" in the Home Squad select. Designer.home_squad_id
-// is a required field (not nullable) per the domain model and PRD §4.3 ("Designer
-// mempunyai Home Squad sebagai struktur organisasi") — every designer belongs to a
-// squad, so this is a validation gate, not a persisted "no squad" state.
-const NO_SQUAD_SELECTED = ""
+// Sentinel for "Unassigned" in the Home Squad select — Base UI Select can't
+// hold a real empty-string item value, same reason profile-identity-fields.tsx
+// uses NO_DEPARTMENT. Maps to home_squad_id: null on save (docs/DECISIONS.md):
+// a designer can be left without a squad rather than always belonging to one.
+const NO_SQUAD_SELECTED = "__none__"
 
 interface DesignerFormState {
   name: string
@@ -76,7 +76,6 @@ interface DesignerFormState {
 interface DesignerFormErrors {
   name?: string
   jobTitle?: string
-  homeSquadId?: string
 }
 
 const EMPTY_FORM: DesignerFormState = {
@@ -143,7 +142,7 @@ export default function DesignersPage() {
       name: designer.name,
       jobTitle: designer.job_title,
       seniority: designer.seniority,
-      homeSquadId: designer.home_squad_id,
+      homeSquadId: designer.home_squad_id ?? NO_SQUAD_SELECTED,
       avatar: designer.avatar,
     })
     setErrors({})
@@ -165,7 +164,6 @@ export default function DesignersPage() {
     const nextErrors: DesignerFormErrors = {}
     if (!form.name.trim()) nextErrors.name = "Name is required."
     if (!form.jobTitle.trim()) nextErrors.jobTitle = "Job title is required."
-    if (form.homeSquadId === NO_SQUAD_SELECTED) nextErrors.homeSquadId = "Home squad is required."
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors)
       return
@@ -175,7 +173,7 @@ export default function DesignersPage() {
       name: form.name.trim(),
       job_title: form.jobTitle.trim(),
       seniority: form.seniority,
-      home_squad_id: form.homeSquadId,
+      home_squad_id: form.homeSquadId === NO_SQUAD_SELECTED ? null : form.homeSquadId,
       avatar: form.avatar.trim(),
     }
 
@@ -248,7 +246,7 @@ export default function DesignersPage() {
       header: "Home Squad",
       cell: (designer) => (
         <span className="text-muted-foreground">
-          {squadsById.get(designer.home_squad_id)?.name ?? "–"}
+          {squadsById.get(designer.home_squad_id ?? "")?.name ?? "Unassigned"}
         </span>
       ),
     },
@@ -460,25 +458,28 @@ export default function DesignersPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="designer-home-squad">Home Squad *</Label>
+                <Label htmlFor="designer-home-squad">
+                  Home Squad <span className="text-muted-foreground">(optional)</span>
+                </Label>
                 <Select
                   value={form.homeSquadId}
-                  onValueChange={(value) => {
-                    setForm((current) => ({ ...current, homeSquadId: value ?? "" }))
-                    setErrors((current) => ({ ...current, homeSquadId: undefined }))
-                  }}
+                  onValueChange={(value) =>
+                    setForm((current) => ({ ...current, homeSquadId: value ?? NO_SQUAD_SELECTED }))
+                  }
                 >
-                  <SelectTrigger
-                    id="designer-home-squad"
-                    className="w-full"
-                    aria-invalid={Boolean(errors.homeSquadId)}
-                    aria-describedby={errors.homeSquadId ? "designer-home-squad-error" : undefined}
-                  >
-                    <SelectValue placeholder="Select a squad">
-                      {(squadId: string) => squadOptions.find((s) => s.id === squadId)?.name ?? ""}
+                  <SelectTrigger id="designer-home-squad" className="w-full">
+                    <SelectValue placeholder="Unassigned">
+                      {(squadId: string) =>
+                        squadId === NO_SQUAD_SELECTED
+                          ? "Unassigned"
+                          : (squadOptions.find((s) => s.id === squadId)?.name ?? "Unassigned")
+                      }
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={NO_SQUAD_SELECTED}>
+                      <span className="text-muted-foreground">Unassigned</span>
+                    </SelectItem>
                     {squadOptions.map((squad) => (
                       <SelectItem key={squad.id} value={squad.id}>
                         {squad.name}
@@ -487,11 +488,6 @@ export default function DesignersPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                {errors.homeSquadId ? (
-                  <p id="designer-home-squad-error" className="text-xs text-destructive">
-                    {errors.homeSquadId}
-                  </p>
-                ) : null}
               </div>
 
               <div className="space-y-1.5">

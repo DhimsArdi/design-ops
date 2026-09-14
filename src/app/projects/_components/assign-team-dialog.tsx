@@ -98,12 +98,12 @@ function AssignTeamDialog({
   const supportOptions = designerOptions
     .filter((designer) => designer.id !== leadDesignerId)
     .map((designer) => {
-      const squad = squadsById.get(designer.home_squad_id)
+      const squad = squadsById.get(designer.home_squad_id ?? "")
       const isCrossSquad = ownerSquadId !== "" && designer.home_squad_id !== ownerSquadId
       return {
         id: designer.id,
         label: personDisplayName(designer, currentDesignerId),
-        description: [designer.job_title, squad?.name ?? "Unknown squad"].filter(Boolean).join(" · "),
+        description: [designer.job_title, squad?.name ?? "Unassigned"].filter(Boolean).join(" · "),
         visual: <PersonAvatar person={designer} size="sm" />,
         badge: isCrossSquad ? (
           <Badge variant="outline" className="h-4 shrink-0 px-1.5 text-[10px] font-normal">

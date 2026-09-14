@@ -27,6 +27,9 @@ import type { Designer, Squad } from "@/lib/domain/types"
 interface AllocationRequest {
   designer: Designer
   targetSquad: Squad
+  /** The card the designer was actually dragged out of — may be a Shared
+   * card, not their Home Squad (§13.1: dragging is per-card, not per-designer). */
+  sourceSquadId: string
 }
 
 interface DesignerAllocationDialogProps {
@@ -42,6 +45,7 @@ function DesignerAllocationDialog({ request, onOpenChange }: DesignerAllocationD
           <AllocationDialogContent
             designer={request.designer}
             targetSquad={request.targetSquad}
+            sourceSquadId={request.sourceSquadId}
             onClose={() => onOpenChange(false)}
           />
         ) : null}
@@ -53,11 +57,12 @@ function DesignerAllocationDialog({ request, onOpenChange }: DesignerAllocationD
 interface AllocationDialogContentProps {
   designer: Designer
   targetSquad: Squad
+  sourceSquadId: string
   onClose: () => void
 }
 
-function AllocationDialogContent({ designer, targetSquad, onClose }: AllocationDialogContentProps) {
-  const oldSquad = squadRepository.getById(designer.home_squad_id)
+function AllocationDialogContent({ designer, targetSquad, sourceSquadId, onClose }: AllocationDialogContentProps) {
+  const oldSquad = designer.home_squad_id ? squadRepository.getById(designer.home_squad_id) : undefined
   const isLeadOfOldSquad = oldSquad?.lead_designer_id === designer.id
 
   function handleMove() {
@@ -65,8 +70,14 @@ function AllocationDialogContent({ designer, targetSquad, onClose }: AllocationD
       squadRepository.update(oldSquad.id, { lead_designer_id: null })
     }
     designerRepository.update(designer.id, { home_squad_id: targetSquad.id })
-    // No longer meaningfully "shared" once they're primary here.
+    // No longer meaningfully "shared" once they're primary here — and clean
+    // up the card they were actually dragged out of too, which is only the
+    // same as their old Home Squad when that's the card they dragged from
+    // (a Shared card drags independently of Home Squad, §13.1).
     squadDesignerMembershipRepository.removeMembership(designer.id, targetSquad.id)
+    if (sourceSquadId !== targetSquad.id) {
+      squadDesignerMembershipRepository.removeMembership(designer.id, sourceSquadId)
+    }
     toast.success(`${designer.name} moved to ${targetSquad.name}`)
     onClose()
   }

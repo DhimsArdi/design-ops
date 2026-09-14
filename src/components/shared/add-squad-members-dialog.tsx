@@ -6,12 +6,12 @@
 // when Squads needed the same flow (docs/DECISIONS.md).
 //
 // Squad membership has no join table: it is derived entirely from
-// Designer.home_squad_id, a required single field (PRD §8.1, §16). So "adding"
+// Designer.home_squad_id, a single nullable field (PRD §8.1, §16). So "adding"
 // someone here is always a reassignment — it moves them out of whichever squad
-// they are in now. That is said twice on purpose, because it is the one thing
-// about this dialog a user can get wrong: once per row (each option's second
-// line names their current squad) and once for the actual selection, in the
-// note above the buttons.
+// they are in now (or out of being Unassigned). That is said twice on purpose,
+// because it is the one thing about this dialog a user can get wrong: once
+// per row (each option's second line names their current squad) and once for
+// the actual selection, in the note above the buttons.
 //
 // Exported twice. The panel is the whole dialog minus its shell, so Manage
 // members can swap to it in place the way it already swaps to the move step —
@@ -102,7 +102,10 @@ function AddSquadMembersPanel({
           </span>
         ),
         // "Product Designer · Squad A" — the job title only when they have one.
-        description: [designer.job_title, squadsById.get(designer.home_squad_id)?.name ?? "Unassigned"]
+        description: [
+          designer.job_title,
+          squadsById.get(designer.home_squad_id ?? "")?.name ?? "Unassigned",
+        ]
           .filter(Boolean)
           .join(" · "),
       }))
@@ -123,7 +126,7 @@ function AddSquadMembersPanel({
   const leadLosses = useMemo(
     () =>
       selected
-        .map((designer) => ({ designer, from: squadsById.get(designer.home_squad_id) }))
+        .map((designer) => ({ designer, from: squadsById.get(designer.home_squad_id ?? "") }))
         .filter(
           (row): row is { designer: Designer; from: Squad } =>
             row.from !== undefined && row.from.lead_designer_id === row.designer.id
@@ -185,7 +188,7 @@ function AddSquadMembersPanel({
           {selected.length === 1 ? (
             <p className="text-sm text-muted-foreground">
               {selected[0]!.name} is currently assigned to{" "}
-              {squadsById.get(selected[0]!.home_squad_id)?.name ?? "no squad"}. Adding them to{" "}
+              {squadsById.get(selected[0]!.home_squad_id ?? "")?.name ?? "no squad"}. Adding them to{" "}
               {squad.name} will change their Home Squad.
             </p>
           ) : null}

@@ -163,7 +163,7 @@ function loadOverviewData(): OverviewData {
       const designer = designerRepository.getById(designerId)!
       return {
         designer,
-        homeSquad: squadsById.get(designer.home_squad_id),
+        homeSquad: squadsById.get(designer.home_squad_id ?? ""),
         projects: [...projects].sort((a, b) => a.name.localeCompare(b.name)),
       }
     })

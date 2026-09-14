@@ -106,7 +106,7 @@ Jumlah project tidak otomatis menentukan seseorang overloaded.
 
 ## 4.3 Structural team ≠ project team
 
-Designer mempunyai **Home Squad** sebagai struktur organisasi.
+Designer mempunyai **Home Squad** sebagai struktur organisasi — tapi field ini opsional. Seorang designer bisa dikeluarkan dari squad-nya (lewat Teams → Squad View atau Master Data → Squads) tanpa harus langsung dipindah ke squad lain, dan menjadi **Unassigned** sampai diberi Home Squad baru.
 
 Namun designer bebas membantu project squad lain.
 
@@ -404,6 +404,8 @@ Junior
 Home Squad:
 Squad A
 ```
+
+`home_squad_id` is optional (§4.3) — a designer can be left **Unassigned**, most often by using `Remove from squad` (§16) or the equivalent action in Teams → Squad View (§14.7).
 
 Designer tidak memiliki allocation percentage.
 
@@ -1732,7 +1734,7 @@ Lead: Raka
 
 Click squad → Squad Detail.
 
-A squad with zero members shows "No designers · Add" in its row. **Add** opens a dialog to search and multi-select Active designers and assign them to this squad in one step, without leaving Squads. Since Home Squad is a single required field per Designer (§8.1), selecting a designer here moves them out of whichever squad they currently belong to — the dialog lists each candidate's current squad so this is never a surprise. Squad Lead stays a link out to Master Data (unchanged).
+A squad with zero members shows "No designers · Add" in its row. **Add** opens a dialog to search and multi-select Active designers and assign them to this squad in one step, without leaving Squads. Home Squad is a single field per Designer (§8.1), so selecting a designer here moves them out of whichever squad they currently belong to (or out of being Unassigned) — the dialog lists each candidate's current squad so this is never a surprise. Squad Lead stays a link out to Master Data (unchanged).
 
 ### Filters
 
@@ -1755,9 +1757,20 @@ its Squad Lead, its Designers (Primary members plus any Shared members,
 Designers are dragged between squad columns to reallocate them; dropping one
 on another squad always asks **Move** (changes their Primary Squad) or
 **Share** (adds a Shared membership, keeping their Primary Squad) before
-anything is written — a drop never mutates membership silently. Clicking a
+anything is written — a drop never mutates membership silently. **Move**
+always cleans up the card the designer was actually dragged out of, even
+when that card is a Shared membership rather than their Primary Squad — a
+designer dragged out of a Shared card and moved elsewhere stops appearing in
+that Shared card too, not just at their old Primary Squad. Clicking a
 designer opens a Designer Details sheet (Overview / Squads / Projects /
 About) rather than navigating away, so the board stays in view.
+
+Every designer row also has a **Remove** action (visible on hover), separate
+from dragging: removing a Shared member only ends that Shared membership;
+removing a Primary member clears their Home Squad entirely, leaving them
+**Unassigned** until someone gives them a new one (§4.3) — both ask for
+confirmation first, and clear the squad's Squad Lead too if the person
+removed held that role.
 
 Table View's own behavior, filters, and Master-Data-only editing are
 unchanged — Squad View is an additional way to read and reallocate the same
@@ -2040,7 +2053,7 @@ Description
 Status
 ```
 
-Use `Active` / `Inactive` (matching Designers, §15) to retire a squad still connected to historical projects — an Inactive squad remains available wherever historical Project data references it as Owner Squad. **Delete** is blocked while any Designer has this squad as their Home Squad or any Project references it as Owner Squad.
+Use `Active` / `Inactive` (matching Designers, §15) to retire a squad still connected to historical projects — an Inactive squad remains available wherever historical Project data references it as Owner Squad. **Delete** is blocked while any Designer has this squad as their Home Squad or any Project references it as Owner Squad. (A Designer's Home Squad is optional — §4.3 — so an Unassigned designer never blocks a Delete.)
 
 Members do not need to be manually maintained twice.
 
@@ -2076,10 +2089,10 @@ Delete
 
 **Add member** opens a searchable multi-select of Active designers who are not
 already in this squad, each listed with their job title and the squad they are
-in now. Because Home Squad is a single required field (§8.1), every selection is
-a **move** — the dialog names the designer's current squad on their row and
-states the consequence for the actual selection before the user confirms.
-Confirming shows `N designers added to <Squad>`.
+in now (or `Unassigned`). Home Squad is a single field per Designer (§8.1), so
+every selection is a **move** — the dialog names the designer's current squad
+on their row and states the consequence for the actual selection before the
+user confirms. Confirming shows `N designers added to <Squad>`.
 
 **Manage members** lists the squad's current members — avatar, name, job title,
 and a `Squad Lead` badge on the lead. Each member has:
@@ -2087,12 +2100,15 @@ and a `Squad Lead` badge on the lead. Each member has:
 ```text
 Make Squad Lead  (or Remove as Squad Lead, for the current lead)
 Move to another squad
+Remove from squad
 ```
 
-There is no *Remove from squad*: a designer cannot exist without a home squad
-(§25), so leaving a squad always means joining another one, and the move step
-requires a destination. `Move to another squad` is unavailable when no other
-Active squad exists.
+`Move to another squad` requires a destination and is unavailable when no
+other Active squad exists. `Remove from squad` clears the designer's Home
+Squad instead of reassigning it, leaving them **Unassigned** (§4.3) until
+someone gives them a new one — it asks for confirmation first, and warns when
+the member being removed is this squad's Squad Lead (same protection as
+below).
 
 **Squad Lead protection.** A Squad may have no lead (§8.2), so a lead can be
 moved out — but never silently. Moving the lead of a squad states the impact

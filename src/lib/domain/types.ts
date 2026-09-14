@@ -94,7 +94,11 @@ export interface Designer {
   name: string;
   job_title: string;
   seniority: Seniority;
-  home_squad_id: string;
+  // Nullable — a designer can be removed from their squad (Teams → Squad
+  // View, or Master Data → Squads) without immediately being reassigned,
+  // leaving them "Unassigned" until someone gives them a new Home Squad
+  // (docs/DECISIONS.md).
+  home_squad_id: string | null;
   // Initials or image URL — no upload flow in MVP, just a display value.
   avatar: string;
   status: EntityStatus;
