@@ -75,8 +75,10 @@ function SquadBoard({ squads, designers, searchQuery }: SquadBoardProps) {
   }, [designers, searchQuery])
 
   function membersFor(squad: Squad): SquadCardMember[] {
+    // The Squad Lead is already shown in their own card section — don't list
+    // or count them again in Designers below.
     const primary = designers
-      .filter((d) => d.home_squad_id === squad.id)
+      .filter((d) => d.home_squad_id === squad.id && d.id !== squad.lead_designer_id)
       .sort(byName)
       .map((designer) => ({ designer, isShared: false }))
 

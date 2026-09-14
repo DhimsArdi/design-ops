@@ -33,7 +33,12 @@ import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
 import { useRepositoryList } from "@/lib/hooks/use-repository-list"
 import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as designerRepository from "@/lib/repositories/designerRepository"
-import { getSquadLead, getSquadMembers, getSquadSharedMembers } from "@/lib/selectors/squadSelectors"
+import {
+  getSquadDesignerRoster,
+  getSquadLead,
+  getSquadMembers,
+  getSquadSharedMembers,
+} from "@/lib/selectors/squadSelectors"
 import type { Squad } from "@/lib/domain/types"
 
 const TEAMS_VIEW_KEY = "designops.teams.view"
@@ -154,7 +159,9 @@ export default function TeamsPage() {
       key: "designers",
       header: "Designers",
       cell: (squad) => {
-        const memberCount = getSquadMembers(squad.id).length
+        // Excludes the Squad Lead — shown in its own column, so it isn't
+        // double-counted here as a separate designer.
+        const memberCount = getSquadDesignerRoster(squad.id).length
         return memberCount > 0 ? (
           <span className="text-muted-foreground">
             {memberCount} {memberCount === 1 ? "designer" : "designers"}

@@ -47,7 +47,7 @@ import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
 import { subscribe } from "@/lib/store/dataStore"
 import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as designerRepository from "@/lib/repositories/designerRepository"
-import { getSquadLead, getSquadMembers, getSquadUsage } from "@/lib/selectors/squadSelectors"
+import { getSquadDesignerRoster, getSquadLead, getSquadUsage } from "@/lib/selectors/squadSelectors"
 import type { Designer, Squad } from "@/lib/domain/types"
 
 export default function SquadsPage() {
@@ -143,7 +143,9 @@ export default function SquadsPage() {
         key: "members",
         header: "Members",
         cell: (squad) => {
-          const memberCount = getSquadMembers(squad.id).length
+          // Excludes the Squad Lead — shown in its own column, so it isn't
+          // double-counted here as a separate member.
+          const memberCount = getSquadDesignerRoster(squad.id).length
           return memberCount === 0 ? (
             <EmptyFieldAction
               label="0 designers"

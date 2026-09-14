@@ -22,6 +22,18 @@ export function getSquadLead(squadId: string): Designer | undefined {
 }
 
 /**
+ * Members to list/count wherever the Squad Lead is already shown as its own
+ * field (Squad View card, Squad Detail, Master Data table, Overview) — the
+ * lead is automatically part of the squad and shouldn't also be listed or
+ * counted as a separate designer there. Full headcount (staffing filters,
+ * delete-usage guard, cross-squad support) keeps using getSquadMembers.
+ */
+export function getSquadDesignerRoster(squadId: string): Designer[] {
+  const squad = squadRepository.getById(squadId);
+  return getSquadMembers(squadId).filter((designer) => designer.id !== squad?.lead_designer_id);
+}
+
+/**
  * Designers shared into this squad beyond their home squad (Teams → Squad
  * View, docs/PRD.MD §13.1) — an explicit, stored membership, distinct from
  * project-based cross-squad support (isCrossSquadAssignment), which stays

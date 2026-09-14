@@ -4,6 +4,10 @@ This file records meaningful product requirement changes.
 
 Do not use this file for minor visual polish, refactoring, or implementation-only changes.
 
+## 2026-09-14 — A squad's Squad Lead no longer double-counts as a separate designer
+
+- **Fixed a double-count:** wherever a squad shows its Squad Lead as its own field (Teams → Squad View card, Squad Detail, Master Data → Squads table, Overview's Team Snapshot), the adjacent Designers/Members list and count also included that same person a second time — since the lead's `home_squad_id` normally points at their own squad, they satisfied both the "Squad Lead" lookup and the "member" filter. `docs/PRD.MD` §14.7, §14.8, and §16 now document that these counts/lists exclude the Squad Lead, who's already shown separately. Staffing filters, search-by-designer-name matching, cross-squad support, and Master Data's "Manage members" dialog (which still lists the lead with a `Squad Lead` badge, for lead-reassignment actions) are unchanged — this only affects the summary list/count shown beside the Squad Lead field. See `docs/DECISIONS.md`.
+
 ## 2026-09-14 — Designers can be removed from a squad; Home Squad is now optional
 
 - **Fixed a Squad View bug:** dragging a Shared member out of a squad card and choosing **Move** only ever reassigned their Primary Squad and cleaned up the *target* squad's Shared row — it never removed the Shared row for the card they were actually dragged out of when that card wasn't their Primary Squad. That designer kept appearing in the old card's list indefinitely, even though Squad Detail (which only reads Primary Squad) correctly stopped showing them — the two screens were reading different membership models and only one side of the move was ever cleaned up. `docs/PRD.MD` §13.1/§14.7 now documents that **Move** always cleans up the card actually dragged from, not just the designer's old Primary Squad.

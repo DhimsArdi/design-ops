@@ -34,7 +34,7 @@ import * as squadRepository from "@/lib/repositories/squadRepository"
 import * as designerRepository from "@/lib/repositories/designerRepository"
 import * as projectRepository from "@/lib/repositories/projectRepository"
 import * as projectAssignmentRepository from "@/lib/repositories/projectAssignmentRepository"
-import { getSquadLead, getSquadMembers } from "@/lib/selectors/squadSelectors"
+import { getSquadDesignerRoster, getSquadLead, getSquadMembers } from "@/lib/selectors/squadSelectors"
 import type { Designer, Project, Squad } from "@/lib/domain/types"
 
 interface OutgoingSupportRow {
@@ -123,7 +123,10 @@ function loadSquadDetail(squadId: string): SquadDetailData | null {
   return {
     squad,
     squadLead: getSquadLead(squadId),
-    members: [...members].sort((a, b) => a.name.localeCompare(b.name)),
+    // The Squad Lead is already shown in their own field above — don't list
+    // them again here. Outgoing support above still uses the full `members`
+    // (including the lead), since that support is real regardless of role.
+    members: getSquadDesignerRoster(squadId).sort((a, b) => a.name.localeCompare(b.name)),
     projectsOwned,
     outgoing,
     incoming,

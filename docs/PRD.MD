@@ -1030,6 +1030,8 @@ Lead: Raka
 4 Designers
 ```
 
+**Designers** here counts `home_squad_id` members excluding the Squad Lead — the lead is already named right beside it, so they aren't also counted as a separate designer (§14.7, §16).
+
 ### Cross-squad Support
 
 Example:
@@ -1732,6 +1734,8 @@ Lead: Raka
 4 Designers
 ```
 
+**Designers** counts `home_squad_id` members excluding the Squad Lead — the lead is already named on the row, so they aren't also counted as a separate designer (same rule everywhere this pairing appears: Squad View, Squad Detail, Master Data → Squads, Overview's Team Snapshot).
+
 Click squad → Squad Detail.
 
 A squad with zero members shows "No designers · Add" in its row. **Add** opens a dialog to search and multi-select Active designers and assign them to this squad in one step, without leaving Squads. Home Squad is a single field per Designer (§8.1), so selecting a designer here moves them out of whichever squad they currently belong to (or out of being Unassigned) — the dialog lists each candidate's current squad so this is never a surprise. Squad Lead stays a link out to Master Data (unchanged).
@@ -1752,7 +1756,9 @@ A second, kanban-style view of the same squads, switched via a Table/Squad
 toggle in the toolbar (default: Table). Squads render as fixed-width columns
 in one horizontal, non-wrapping row — never onto a second row — each showing
 its Squad Lead, its Designers (Primary members plus any Shared members,
-§13.1), and its owned Projects (collapsed to a count, expandable).
+§13.1, excluding whoever is this squad's Squad Lead — already shown in the
+section above and not re-listed here), and its owned Projects (collapsed to
+a count, expandable).
 
 Designers are dragged between squad columns to reallocate them; dropping one
 on another squad always asks **Move** (changes their Primary Squad) or
@@ -1792,15 +1798,14 @@ Dimas
 ### Members
 
 ```text
-Dimas
-Senior Product Designer
-
 Sarah
 Junior Product Designer
 
 Malik
 Junior Product Designer
 ```
+
+Dimas isn't repeated here — he's already shown above as Squad Lead. **Members** lists `home_squad_id` designers excluding the Squad Lead.
 
 ### Projects Owned by Squad
 
@@ -2120,7 +2125,12 @@ squad they are coming from.
 **Member count.** The `N designers` cell in the Squads table opens Manage
 members. Only the count is interactive — the row itself is not clickable. A
 squad with no members shows `0 designers · Add member` instead, matching the
-`No designers · Add` treatment Squads already uses (§14.7).
+`No designers · Add` treatment Squads already uses (§14.7). `N` excludes the
+Squad Lead — already named in this row's own `Squad Lead` column, so they
+aren't also counted as a separate designer here (same rule as §14.7's Squad
+View and §14.8's Squad Detail). Manage members, once opened, still lists the
+lead alongside everyone else with their `Squad Lead` badge, since that's
+where lead-related actions (Make/Remove Squad Lead) live.
 
 ---
 

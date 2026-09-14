@@ -51,7 +51,7 @@ import {
   isTerminalStatus,
   UNASSIGNED_DESIGN_LEAD,
 } from "@/lib/selectors/projectSelectors"
-import { getSquadLead, getSquadMembers } from "@/lib/selectors/squadSelectors"
+import { getSquadDesignerRoster, getSquadLead } from "@/lib/selectors/squadSelectors"
 import { PRIORITIES, PROJECT_HEALTHS } from "@/lib/domain/enums"
 import { monthOf } from "@/lib/domain/dateUtils"
 import type { Designer, Project, Squad } from "@/lib/domain/types"
@@ -143,7 +143,8 @@ function loadOverviewData(): OverviewData {
     .map((squad) => ({
       squad,
       lead: getSquadLead(squad.id),
-      memberCount: getSquadMembers(squad.id).length,
+      // Excludes the Squad Lead, shown separately right beside this count.
+      memberCount: getSquadDesignerRoster(squad.id).length,
     }))
     .sort((a, b) => a.squad.name.localeCompare(b.squad.name))
 
