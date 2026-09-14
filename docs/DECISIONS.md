@@ -1382,3 +1382,24 @@ imported selector directly there compiles fine but reads from
 `profileRepository.getAll()` without the memo's dependency array actually
 referencing `profiles`, which `react-hooks/exhaustive-deps` correctly flags
 as a dependency the memo doesn't see.
+
+## Onboarding captcha error handling (2026-09-14): retry mechanism for playcaptcha v0.1.0
+
+**Problem:** Some users encounter "Cannot coerce the result to a single JSON object" error when completing the ClawCaptcha on Onboarding screen. Error occurs intermittently; most users complete it fine.
+
+**Root cause:** `playcaptcha` library v0.1.0 is early-stage and has race conditions in response parsing. When assets load slowly or under certain timing conditions, the JSON coercion fails. Error is not in our code but in the library's internal response handler.
+
+**Decision:** Add defensive error handling and recovery in `OnboardingView` rather than waiting for a playcaptcha patch (which may take time or never ship in v0.1.0):
+
+- Capture captcha verification errors and display them clearly
+- Provide "Try again" button that resets the captcha component (via key change, triggering re-mount)
+- Wrap form submission in try-catch to surface any parsing errors from the library
+- Keep "Back" button available to return to form if user prefers to skip/retry onboarding flow
+
+This is a user-facing workaround, not a permanent fix. **Upgrade path:** if the error persists or becomes frequent, we should either:
+
+1. Upgrade playcaptcha to a newer version once available and stable
+2. Switch to an alternative CAPTCHA library (hCaptcha, reCAPTCHA, etc.)
+3. Remove CAPTCHA if bot prevention is not critical (product decision)
+
+Current state: recoverable for users, with clear error messaging and retry path. No data loss.

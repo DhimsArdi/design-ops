@@ -55,6 +55,8 @@ export function OnboardingView() {
   const currentUser = useCurrentUser()
   const [step, setStep] = useState<"form" | "captcha">("form")
   const [captchaVerified, setCaptchaVerified] = useState(false)
+  const [captchaError, setCaptchaError] = useState<string | null>(null)
+  const [captchaKey, setCaptchaKey] = useState(0)
   const [designers] = useRepositoryList(designerRepository)
   const [stakeholders] = useRepositoryList(stakeholderRepository)
   const [departments] = useRepositoryList(departmentRepository)
@@ -75,7 +77,17 @@ export function OnboardingView() {
 
   function handleContinue(event: FormEvent) {
     event.preventDefault()
-    if (form.validate()) setStep("captcha")
+    if (form.validate()) {
+      setCaptchaError(null)
+      setCaptchaVerified(false)
+      setStep("captcha")
+    }
+  }
+
+  function resetCaptcha() {
+    setCaptchaError(null)
+    setCaptchaVerified(false)
+    setCaptchaKey((k) => k + 1)
   }
 
   return (
@@ -133,14 +145,34 @@ export function OnboardingView() {
               <p className="text-sm text-muted-foreground">One last step before you get started.</p>
             </div>
 
-            <form onSubmit={form.handleSubmit} className="space-y-8">
+            <form
+              onSubmit={async (e) => {
+                try {
+                  await form.handleSubmit(e)
+                } catch (err) {
+                  setCaptchaError(
+                    err instanceof Error ? err.message : "Verification failed. Please try again.",
+                  )
+                }
+              }}
+              className="space-y-8"
+            >
               <ClawCaptcha
-                onVerify={() => setCaptchaVerified(true)}
+                key={captchaKey}
+                onVerify={() => {
+                  setCaptchaVerified(true)
+                  setCaptchaError(null)
+                }}
                 assetBase="/playcaptcha/toys/"
                 className="mx-auto"
               />
 
               <div aria-live="polite">
+                {captchaError && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{captchaError}</AlertDescription>
+                  </Alert>
+                )}
                 {form.error ? (
                   <Alert variant="destructive">
                     <AlertDescription>{form.error}</AlertDescription>
@@ -154,11 +186,17 @@ export function OnboardingView() {
                 </Button>
                 <button
                   type="button"
-                  onClick={() => setStep("form")}
+                  onClick={() => {
+                    if (captchaError) {
+                      resetCaptcha()
+                    } else {
+                      setStep("form")
+                    }
+                  }}
                   className="flex w-full items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
                 >
                   <ArrowLeft className="size-3.5" />
-                  Back
+                  {captchaError ? "Try again" : "Back"}
                 </button>
               </div>
             </form>
