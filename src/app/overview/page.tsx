@@ -238,7 +238,7 @@ export default function OverviewPage() {
         description="Current status across active work, timeline, and the design team."
       />
 
-      <div className="space-y-8">
+      <div className="space-y-6">
       <ContentSection bodyClassName="flex flex-wrap divide-x divide-border p-0">
         <Stat label="Active Projects" value={data.activeCount} />
         <Stat label="Designers" value={data.activeDesignerCount} />
