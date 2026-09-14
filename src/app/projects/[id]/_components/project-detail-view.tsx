@@ -542,7 +542,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
               }
             />
           ) : (
-            <div className="flex gap-3 overflow-x-auto pb-1">
+            <div className="flex gap-3 overflow-x-auto overscroll-x-contain scrollbar-themed pb-2">
               {monthlyTargets.map((target) => (
                 <div
                   key={target.id}

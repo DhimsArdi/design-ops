@@ -311,7 +311,7 @@ export default function StakeholdersPage() {
   const tableHeight = Math.min(560, (filteredStakeholders.length + 1) * 48)
 
   return (
-    <div className="space-y-6">
+    <div>
       <PageHeader
         title="Stakeholders"
         description="Department heads, product owners, and project admins referenced from Project forms."
@@ -323,6 +323,7 @@ export default function StakeholdersPage() {
         }
       />
 
+      <div className="space-y-6">
       <ContentSection bodyClassName="space-y-4">
         {isLoading ? (
           <p className="py-10 text-center text-sm text-muted-foreground">
@@ -527,6 +528,7 @@ export default function StakeholdersPage() {
           }}
         />
       ) : null}
+      </div>
     </div>
   )
 }

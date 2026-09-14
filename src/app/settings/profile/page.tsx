@@ -64,12 +64,13 @@ export default function ProfileSettingsPage() {
   if (!currentUser) return null
 
   return (
-    <form onSubmit={form.handleSubmit} className="space-y-8">
+    <form onSubmit={form.handleSubmit}>
       <PageHeader
         title="Profile"
         description="Manage your personal information and identity across DesignOps."
       />
 
+      <div className="space-y-8">
       <ProfileIdentityFields form={form} email={currentUser.email} />
 
       <Separator />
@@ -119,6 +120,7 @@ export default function ProfileSettingsPage() {
         {form.isDirty && !form.submitting ? (
           <p className="text-sm text-muted-foreground">You have unsaved changes.</p>
         ) : null}
+      </div>
       </div>
     </form>
   )

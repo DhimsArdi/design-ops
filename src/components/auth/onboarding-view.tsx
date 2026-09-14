@@ -79,7 +79,7 @@ export function OnboardingView() {
   }
 
   return (
-    <div className="flex min-h-svh justify-center overflow-y-auto p-6">
+    <div className="flex h-svh justify-center overflow-y-auto p-6">
       <div className="w-full max-w-lg py-10">
         {step === "form" ? (
           <>
@@ -89,6 +89,15 @@ export function OnboardingView() {
                 A couple of details before you get started.
               </p>
             </div>
+
+            {currentUser.profile?.force_reonboarded ? (
+              <Alert className="mb-6">
+                <AlertDescription>
+                  An admin removed the designer or stakeholder record linked to your
+                  account, so we need you to confirm these details again.
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
             <form onSubmit={handleContinue} className="space-y-8">
               <ProfileIdentityFields form={form} email={currentUser.email} />

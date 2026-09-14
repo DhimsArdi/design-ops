@@ -50,6 +50,14 @@ export interface Profile {
   // enforced by column privileges in supabase/schema.sql, not by the UI.
   system_role: SystemRole;
 
+  // True when an admin force-deleted this account's linked Designer/
+  // Stakeholder row (design_role was reset to null alongside it) — what
+  // OnboardingView reads to explain WHY the gate reappeared, rather than
+  // showing the same first-time "Welcome" copy. Cleared by the database the
+  // moment design_role is set again. Never writable by its own user, same as
+  // system_role.
+  force_reonboarded: boolean;
+
   // This account's own department, chosen in Settings → Profile. Feeds the
   // Stakeholder record created for a "Department Head" design_role, and is
   // otherwise just a personal detail — replaces the old free-text job_title

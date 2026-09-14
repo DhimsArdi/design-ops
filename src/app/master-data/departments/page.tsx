@@ -248,7 +248,7 @@ export default function DepartmentsPage() {
   const tableHeight = Math.min(560, (filteredDepartments.length + 1) * 48)
 
   return (
-    <div className="space-y-6">
+    <div>
       <PageHeader
         title="Departments"
         description="Business departments used to group epics and attribute project ownership."
@@ -260,6 +260,7 @@ export default function DepartmentsPage() {
         }
       />
 
+      <div className="space-y-6">
       <ContentSection
         bodyClassName="space-y-4"
       >
@@ -421,6 +422,7 @@ export default function DepartmentsPage() {
           onConfirm={handleDeleteConfirm}
         />
       ) : null}
+      </div>
     </div>
   )
 }

@@ -295,7 +295,7 @@ export function PersonDetailView({ designerId }: PersonDetailViewProps) {
         {rows.length === 0 ? (
           <EmptyState title="Nothing to show on the timeline yet" />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overscroll-x-contain scrollbar-themed pb-2">
             <MonthRangeTrack rows={rows} monthRange={monthRange} />
           </div>
         )}

@@ -205,7 +205,7 @@ export default function SquadsPage() {
   const tableHeight = Math.min(560, (filteredSquads.length + 1) * 48)
 
   return (
-    <div className="space-y-6">
+    <div>
       <PageHeader
         title="Squads"
         description="Design squads and their leads. Membership is derived from each designer's Home Squad."
@@ -217,6 +217,7 @@ export default function SquadsPage() {
         }
       />
 
+      <div className="space-y-6">
       <ContentSection
         bodyClassName="space-y-4"
       >
@@ -312,6 +313,7 @@ export default function SquadsPage() {
           onConfirm={handleDeleteConfirm}
         />
       ) : null}
+      </div>
     </div>
   )
 }

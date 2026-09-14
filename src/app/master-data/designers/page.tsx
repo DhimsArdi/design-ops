@@ -302,7 +302,7 @@ export default function DesignersPage() {
   const hasResults = visibleDesigners.length > 0
 
   return (
-    <div className="space-y-6">
+    <div>
       <PageHeader
         title="Designers"
         description="The design team roster: home squad, seniority, and status for every designer."
@@ -314,6 +314,7 @@ export default function DesignersPage() {
         }
       />
 
+      <div className="space-y-6">
       <ContentSection bodyClassName="space-y-4">
         {!hasAnyDesigners ? (
           <EmptyState
@@ -520,6 +521,7 @@ export default function DesignersPage() {
           </form>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   )
 }

@@ -243,6 +243,13 @@ create table public.profiles (
                           system_role in ('Admin', 'Member', 'Viewer')
                         ),
 
+  -- Set (with design_role reset to null) by `reonboard_profiles_on_designer_
+  -- delete`/`_stakeholder_delete` below, so Onboarding can say WHY it's back
+  -- (PRD §6.1, §25) instead of looking unexplained. Cleared automatically by
+  -- `clear_force_reonboarded` the moment design_role is set again. Not
+  -- self-writable, same reason as system_role.
+  force_reonboarded     boolean not null default false,
+
   -- This account's own department (PRD §6.1). Replaces the old free-text
   -- job_title, which nothing reads or writes anymore. `set null` rather than
   -- restrict: a Department can still be retired/deleted freely even though a
@@ -317,6 +324,80 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- Force re-Onboarding when the account behind a "Verified" row (docs/PRD.MD
+-- §15, §19) gets force-deleted via Master Data's `Delete anyway`
+-- (docs/DECISIONS.md). designer_id/stakeholder_id already unclaim themselves
+-- via `on delete set null` above; this additionally clears design_role, the
+-- one signal `needsOnboarding` (src/components/auth/onboarding-view.tsx)
+-- checks, so the account is dropped back into Onboarding — and its captcha —
+-- instead of looking like a still-verified, still-onboarded account whose
+-- linked record no longer exists. Scoped to an actual row DELETE, matched by
+-- the OLD row's own id, so it never fires for a profile voluntarily
+-- unlinking itself via Settings/Onboarding (which always clears its own
+-- design_role in that same save, before the row it dropped is separately
+-- removed).
+--
+-- `security definer`, same reason as `handle_new_user()` above: the profile
+-- being reset almost always belongs to a different account than the admin
+-- doing the deleting, and `profiles_update_own`/the column-level GRANT below
+-- only let the `authenticated` role touch its own row — without this the
+-- UPDATE would silently match zero rows for anyone else's profile.
+create function public.reonboard_profiles_on_designer_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.profiles
+  set design_role = null, force_reonboarded = true
+  where designer_id = old.id;
+  return old;
+end;
+$$;
+
+create trigger designers_reonboard_before_delete
+  before delete on public.designers
+  for each row execute function public.reonboard_profiles_on_designer_delete();
+
+create function public.reonboard_profiles_on_stakeholder_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.profiles
+  set design_role = null, force_reonboarded = true
+  where stakeholder_id = old.id;
+  return old;
+end;
+$$;
+
+create trigger stakeholders_reonboard_before_delete
+  before delete on public.stakeholders
+  for each row execute function public.reonboard_profiles_on_stakeholder_delete();
+
+-- Clears force_reonboarded the moment Onboarding (or Settings) sets a
+-- design_role again — same-row modification of the account's own profile
+-- (profiles_update_own already permits that), so unlike the two functions
+-- above this needs no elevated privilege.
+create function public.clear_force_reonboarded()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.design_role is not null then
+    new.force_reonboarded = false;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger profiles_clear_force_reonboarded
+  before update on public.profiles
+  for each row execute function public.clear_force_reonboarded();
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security

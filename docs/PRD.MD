@@ -2025,7 +2025,7 @@ Use `Active` / `Inactive` to retire a designer that is still connected to histor
 
 The row that is the signed-in account's own Designer (`Profile.designer_id`, §6.1) reads `[Name] (Me)`, matching every other person picker in the app (docs/PRD.MD §14.11), and its **Delete** action is disabled outright — an account can't delete the record standing in for itself. This is separate from and in addition to the usage guard above: it applies even to a designer with zero assignments.
 
-A **Verified** badge sits next to any row that some account has claimed via `Profile.designer_id` (§6.1) — i.e. someone was invited, signed in, and completed Onboarding into this record, rather than the row being created directly here in Master Data. Unverified is the normal state for a designer added ahead of that person's invite; it is not an error or a warning.
+A **Verified** badge sits next to any row that some account has claimed via `Profile.designer_id` (§6.1) — i.e. someone was invited, signed in, and completed Onboarding into this record, rather than the row being created directly here in Master Data. Unverified is the normal state for a designer added ahead of that person's invite; it is not an error or a warning. Force-deleting a Verified row via `Delete anyway` also forces the claiming account back through Onboarding — see §25.
 
 ---
 
@@ -2168,7 +2168,7 @@ Do not hardcode stakeholder names directly inside project form.
 
 Use `Active` / `Inactive` to retire a stakeholder still connected to historical data — an Inactive stakeholder remains available wherever historical Project data references them. **Delete** is blocked while any Department still names them as its head, or any Project still references them as a department-head snapshot, Product Owner, or Project Admin/PIC.
 
-Same **Verified** badge as Designers (§15), driven by `Profile.stakeholder_id` (§6.1) instead of `Profile.designer_id`.
+Same **Verified** badge as Designers (§15), driven by `Profile.stakeholder_id` (§6.1) instead of `Profile.designer_id`, including forcing the claiming account back through Onboarding on `Delete anyway` (§25).
 
 ---
 
@@ -2522,6 +2522,18 @@ cannot exist without an owner squad, an epic and a department, and a designer
 cannot exist without a home squad, so "delete anyway" there would mean
 destroying projects or designers rather than detaching them. These stay
 blocked; retire them with Inactive instead.
+
+If the Designer or Stakeholder being force-deleted is **Verified** (§15, §19)
+— claimed by a signed-in account via `Profile.designer_id`/`.stakeholder_id`
+— that account is forced back through Onboarding, captcha included, the next
+time it loads the app: already signed in, it is dropped into Onboarding on
+its own without needing to sign out first; not yet signed in, it meets
+Onboarding on its next sign-in. The account is not treated as still verified
+once the record it verified into no longer exists — it is exactly the same
+gate a brand-new account meets, not a special "reinstated" state, except for
+one difference: Onboarding shows a note explaining that an admin removed its
+linked record, so it reads as an explained reset rather than an unexplained
+one.
 
 `Delete anyway` is the only action in the product that discards data the user
 cannot recover, so it always states its consequence in the dialog rather than

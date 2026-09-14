@@ -102,9 +102,10 @@ export default function SecuritySettingsPage() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-8">
+    <form onSubmit={handleSubmit}>
       <PageHeader title="Security" description="Manage your password and account security." />
 
+      <div className="space-y-8">
       <SettingsSection
         title="Password"
         description="Choose a password you don't use anywhere else."
@@ -191,6 +192,7 @@ export default function SecuritySettingsPage() {
           </Button>
         </div>
       </SettingsSection>
+      </div>
     </form>
   )
 }

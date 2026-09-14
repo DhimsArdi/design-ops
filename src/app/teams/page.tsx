@@ -184,12 +184,13 @@ export default function TeamsPage() {
     filters.search.trim() !== "" || filters.staffing !== "all" || filters.lead !== "all" || filters.status !== "all"
 
   return (
-    <div className="space-y-6">
+    <div>
       <PageHeader
         title="Squads"
         description="Design squad structure: leads, members, and status."
       />
 
+      <div className="space-y-6">
       <ContentSection bodyClassName={!hasAnySquads ? undefined : "space-y-4"}>
         {!hasAnySquads ? (
           <EmptyState
@@ -245,6 +246,7 @@ export default function TeamsPage() {
           onAdded={refreshDesigners}
         />
       ) : null}
+      </div>
     </div>
   )
 }

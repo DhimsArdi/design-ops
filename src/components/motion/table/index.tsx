@@ -263,7 +263,7 @@ export function Table<T>({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="overflow-auto"
+        className="overflow-auto scrollbar-themed"
         style={{ height }}
       >
         <table

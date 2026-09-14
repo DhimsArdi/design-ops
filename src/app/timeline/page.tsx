@@ -250,12 +250,13 @@ export default function TimelinePage() {
     filters.showArchived
 
   return (
-    <div className="space-y-4">
+    <div>
       <PageHeader
         title="Timeline"
         description="Project schedules, commitments, and delivery risk. Drag or resize a bar to reschedule it."
       />
 
+      <div className="space-y-4">
       {!hasAnyProjects ? (
         <ContentSection>
           <EmptyState
@@ -355,6 +356,7 @@ export default function TimelinePage() {
           </div>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   )
 }

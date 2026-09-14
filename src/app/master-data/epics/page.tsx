@@ -232,7 +232,7 @@ export default function EpicsPage() {
   const tableHeight = Math.min(560, (filteredEpics.length + 1) * 48)
 
   return (
-    <div className="space-y-6">
+    <div>
       <PageHeader
         title="Epics"
         description="The initiative-level context every project belongs to, scoped to one department."
@@ -244,6 +244,7 @@ export default function EpicsPage() {
         }
       />
 
+      <div className="space-y-6">
       <ContentSection
         bodyClassName="space-y-4"
       >
@@ -397,6 +398,7 @@ export default function EpicsPage() {
           onConfirm={handleDeleteConfirm}
         />
       ) : null}
+      </div>
     </div>
   )
 }

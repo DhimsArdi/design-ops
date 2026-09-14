@@ -211,7 +211,7 @@ export default function PeoplePage() {
   const tableHeight = Math.min(560, (visibleDesigners.length + 1) * 48)
 
   return (
-    <div className="space-y-6">
+    <div>
       <PageHeader
         title="People"
         description="Every designer on the team: role, home squad, and project involvement."
@@ -226,6 +226,8 @@ export default function PeoplePage() {
           </Button>
         }
       />
+
+      <div className="space-y-6">
 
       <ContentSection bodyClassName="space-y-4">
         {!hasAnyDesigners ? (
@@ -272,6 +274,7 @@ export default function PeoplePage() {
           </>
         )}
       </ContentSection>
+      </div>
     </div>
   )
 }

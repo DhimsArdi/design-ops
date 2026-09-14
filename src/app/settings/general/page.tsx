@@ -148,12 +148,13 @@ export default function GeneralSettingsPage() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-8">
+    <form onSubmit={handleSubmit}>
       <PageHeader
         title="General"
         description="Manage your default preferences across DesignOps."
       />
 
+      <div className="space-y-8">
       <SettingsSection
         title="Regional"
         description="How dates and times are presented for your account."
@@ -325,6 +326,7 @@ export default function GeneralSettingsPage() {
         {isDirty && !submitting ? (
           <p className="text-sm text-muted-foreground">You have unsaved changes.</p>
         ) : null}
+      </div>
       </div>
     </form>
   )

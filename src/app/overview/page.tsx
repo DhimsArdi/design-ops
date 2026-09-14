@@ -207,7 +207,7 @@ export default function OverviewPage() {
 
   if (!data.hasAnyProjects) {
     return (
-      <div className="space-y-6">
+      <div>
         <PageHeader
           title="Design Portfolio"
           description="Current status across active work, timeline, and the design team."
@@ -232,12 +232,13 @@ export default function OverviewPage() {
   const healthTotal = PROJECT_HEALTHS.reduce((sum, health) => sum + data.healthCounts[health], 0)
 
   return (
-    <div className="space-y-8">
+    <div>
       <PageHeader
         title="Design Portfolio"
         description="Current status across active work, timeline, and the design team."
       />
 
+      <div className="space-y-8">
       <ContentSection bodyClassName="flex flex-wrap divide-x divide-border p-0">
         <Stat label="Active Projects" value={data.activeCount} />
         <Stat label="Designers" value={data.activeDesignerCount} />
@@ -393,6 +394,7 @@ export default function OverviewPage() {
             </>
           )}
         </ContentSection>
+      </div>
       </div>
     </div>
   )

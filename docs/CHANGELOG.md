@@ -4,6 +4,11 @@ This file records meaningful product requirement changes.
 
 Do not use this file for minor visual polish, refactoring, or implementation-only changes.
 
+## 2026-09-14 — Force-deleting a Verified Designer/Stakeholder sends the claiming account back through Onboarding
+
+- **`Delete anyway` on a Verified row now re-onboards its account** (`docs/PRD.MD` §15, §19, §25). Force-deleting a Designer or Stakeholder that a signed-in account has claimed (Verified badge, §15/§19) clears that account's `design_role`, which is the entire signal `needsOnboarding` checks — so the account is shown Onboarding again, captcha included, the next time it loads the app. Already signed in, it drops into Onboarding on its own (existing realtime sync on `profiles`); not yet signed in, it meets Onboarding on next sign-in. Does not fire when an account voluntarily changes away from a designer/stakeholder role itself. See `docs/DECISIONS.md`.
+- **Onboarding explains why it reappeared**, when it's for this reason: a new note above the form reads "An admin removed the designer or stakeholder record linked to your account, so we need you to confirm these details again," backed by a new `profiles.force_reonboarded` flag that clears itself once the form is saved. Without it the account would see the exact same first-time "Welcome to DesignOps" copy a brand-new account gets, with no way to tell the two apart. See `docs/DECISIONS.md`.
+
 ## 2026-09-13 — Master Data → Designers and Stakeholders show a Verified badge for rows claimed by a real account
 
 - **New "Verified" badge** (`docs/PRD.MD` §6.1, §15, §19) next to the Name column on Master Data → Designers and → Stakeholders. It marks a row as claimed by a real invited account that signed in and completed Onboarding — i.e. `profiles.designer_id`/`profiles.stakeholder_id` points at it — distinguishing it from a row created directly in Master Data with no account behind it. Nothing new is stored: this reuses the existing `Profile.designer_id`/`Profile.stakeholder_id` link (already in the domain model) rather than adding a field to Designer/Stakeholder. See `docs/DECISIONS.md` for why it's computed rather than stored.

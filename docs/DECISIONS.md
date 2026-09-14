@@ -515,6 +515,26 @@ Squad, Department and Epic keep the hard block. This is not caution — it is th
 
 **Also changed:** `projects.department_head_id` was documented as a snapshot that "must survive the stakeholder row being deleted". Force-deleting that stakeholder now clears it. An id pointing at a row that no longer exists is a dangling pointer, not history — it resolves to nothing on screen either way, and the name it was meant to preserve is gone with the row.
 
+## `Delete anyway` on a Verified Designer/Stakeholder also forces the claiming account back through Onboarding — via a DB trigger, not new client code
+
+**Decision:** Force-deleting a Designer or Stakeholder row that is Verified (§15, §19 — some `profiles` row points at it via `designer_id`/`stakeholder_id`) now also clears that profile's `design_role`. That column is the entire `needsOnboarding` check (`src/components/auth/onboarding-view.tsx`, `!profile.design_role`), so clearing it is indistinguishable from a brand-new account: the next time that session loads the app it is shown Onboarding — captcha included, since `captchaVerified` is local state on a component that simply wasn't mounted a moment ago — rather than something bespoke like a "reinstate" screen or an "account deleted" notice.
+
+Implemented as two `before delete` triggers, one on `designers` and one on `stakeholders` (`supabase/schema.sql`, `supabase/migrations/005_reonboard_on_verified_delete.sql`), each doing one `update profiles set design_role = null where designer_id = old.id` (or `stakeholder_id`). No new column, no new route, no new client code: `profiles` is already realtime-subscribed and already in `dataStore`'s cache (`subscribeRealtime`, §above "Supabase behind a synchronous in-memory cache"), so an already-open tab picks up the cleared `design_role` and drops into Onboarding on its own — no polling, no forced sign-out, no separate "live-force" mechanism had to be built for the already-signed-in case.
+
+Scoped to fire only on an actual row DELETE, matched by `old.id` in the trigger — never on a profile voluntarily unlinking itself. Settings/Onboarding (`useProfileIdentityForm.handleSubmit`) always writes its own `design_role` change and awaits it (`profileRepository.save`, a real round trip, not optimistic) *before* separately calling `designerRepository.remove`/`stakeholderRepository.remove` on the now-unclaimed row — so by the time that row is actually deleted, no profile's `designer_id`/`stakeholder_id` still points at it, and the trigger's `where` clause matches nothing.
+
+**Why:** Asked for directly — a deleted Designer/Stakeholder's account should not keep looking "done" once the record it verified into is gone, whether or not that session happens to be open right now. A trigger scoped to the delete itself (rather than, say, any transition of `designer_id`/`stakeholder_id` to null on `profiles`) is what keeps this from also firing on the legitimate, everyday case of an account switching away from a designer/stakeholder role on its own — that path clears `design_role` itself, deliberately, in the same save.
+
+## `force_reonboarded` explains WHY Onboarding reappeared — a plain boolean, not a free-text reason column
+
+**Decision:** `profiles.force_reonboarded` (`supabase/migrations/006_force_reonboarded_flag.sql`) is set to `true` by the same two delete triggers above, alongside the `design_role` reset they already do. `OnboardingView` reads it to show one extra note above the form — "An admin removed the designer or stakeholder record linked to your account, so we need you to confirm these details again" — instead of the plain first-time "Welcome to DesignOps" copy `needsOnboarding` alone can't distinguish (a brand-new account and a force-reset one both simply have `design_role = null`).
+
+It clears itself: a third trigger, `clear_force_reonboarded` (`before update on profiles`), sets it back to `false` the moment `design_role` is set to anything non-null — i.e. the instant Onboarding's own save succeeds. No client code clears it, and nothing can leave it stuck true.
+
+A single boolean rather than an enum/free-text reason column, deliberately: there is exactly one thing that sets it today (a force-delete unclaiming this account), so a column built to describe several causes would be speculative. Not user-writable — absent from the column-level GRANT, same as `system_role` — since a user setting this on themselves would fabricate a message about an admin action that didn't happen.
+
+**Why:** Asked for directly — showing the exact same "Welcome to DesignOps" first-time copy to an account that just got its verified record deleted out from under it reads as an unexplained reset ("why do I suddenly have to fill this out again?"), not a fresh start. One sentence naming the actual cause is enough; a fuller audit trail (when, by whom) was not asked for and isn't built.
+
 ## ProjectAssignment and ProjectMonthlyTarget support real removal, distinct from the no-hard-delete rule above
 
 **Decision:** `createRemovableRepository` (a thin wrapper adding `remove(id)` on top of the plain `createRepository`) is used only for the `ProjectAssignment` and `ProjectMonthlyTarget` repositories. Every Master Data repository and the Project repository use plain `createRepository` and never get `remove`.

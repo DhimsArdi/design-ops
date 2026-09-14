@@ -110,7 +110,9 @@ function SquadBoard({ squads, designers, searchQuery }: SquadBoardProps) {
   return (
     <>
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        <div className="flex w-full min-w-0 flex-nowrap items-start gap-4 overflow-x-auto pb-2">
+        {/* overscroll-x-contain stops a horizontal swipe from chaining into a
+            parent's horizontal scroll once this row hits its own edge. */}
+        <div className="flex w-full min-w-0 flex-nowrap items-start gap-4 overflow-x-auto overscroll-x-contain scrollbar-themed pb-2">
           {squads.map((squad) => (
             <SquadCard
               key={squad.id}

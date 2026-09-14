@@ -511,7 +511,7 @@ function ProjectsPageContent() {
     filters.needsAllocation
 
   return (
-    <div className="space-y-6">
+    <div>
       <PageHeader
         title="Projects"
         description="Plan, assign, and track design projects across the team."
@@ -523,6 +523,7 @@ function ProjectsPageContent() {
         }
       />
 
+      <div className="space-y-6">
       <ContentSection bodyClassName="space-y-4">
         {!hasAnyProjects ? (
           <EmptyState
@@ -625,6 +626,7 @@ function ProjectsPageContent() {
           onSaved={() => setTableAssignTarget(null)}
         />
       ) : null}
+      </div>
     </div>
   )
 }

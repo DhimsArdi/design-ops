@@ -197,6 +197,28 @@
   }
 }
 
+/* Plain overflow-auto containers (tables, squad board, timeline strips) get
+   the browser's own default scrollbar, which reads as a different weight and
+   color per OS/browser than the styled ScrollArea thumb (scroll-area.tsx,
+   bg-border) used by the sidebar and Gantt. This ties the two together so
+   every scrollbar in the app is the same thin, --border-colored bar. */
+@utility scrollbar-themed {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+  }
+}
+
 /* playcaptcha (ClawCaptcha, src/components/auth/onboarding-view.tsx) ships
    bright defaults built for a playful product; these map it onto this app's
    own tokens so the one playful step in onboarding still reads as DesignOps,
