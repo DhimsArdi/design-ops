@@ -80,9 +80,37 @@ export function setLocal<T>(table: TableName, rows: readonly T[]): void {
 }
 
 async function fetchTable(table: TableName): Promise<void> {
-  const { data, error } = await supabase.from(table).select("*");
-  if (error) throw error;
-  cache.set(table, data ?? []);
+  let lastError: PostgrestError | null = null;
+  const maxRetries = 3;
+  const baseDelay = 100; // ms
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const { data, error } = await supabase.from(table).select("*");
+
+    if (!error) {
+      cache.set(table, data ?? []);
+      return;
+    }
+
+    lastError = error;
+
+    // Retry pada JWT clock skew error
+    if (
+      error.message?.includes("JWT") &&
+      error.message?.includes("future") &&
+      attempt < maxRetries - 1
+    ) {
+      const delay = baseDelay * Math.pow(2, attempt); // exponential backoff
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      continue;
+    }
+
+    // Throw immediately untuk error lain
+    throw error;
+  }
+
+  // Semua retry gagal
+  throw lastError;
 }
 
 /**
