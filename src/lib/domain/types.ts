@@ -3,6 +3,7 @@
 // for the rationale behind the two non-obvious fields on Project.
 
 import type {
+  DesignerJobTitle,
   DesignRole,
   EntityStatus,
   LandingPage,
@@ -92,7 +93,7 @@ export interface Profile {
 export interface Designer {
   id: string;
   name: string;
-  job_title: string;
+  job_title: DesignerJobTitle;
   seniority: Seniority;
   // Nullable — a designer can be removed from their squad (Teams → Squad
   // View, or Master Data → Squads) without immediately being reassigned,

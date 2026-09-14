@@ -4,6 +4,11 @@ This file records meaningful product requirement changes.
 
 Do not use this file for minor visual polish, refactoring, or implementation-only changes.
 
+## 2026-09-14 — Designer's Job Title is now a select ("Design Role"), not free text
+
+- **Master Data → Designers** (`docs/PRD.MD` §8.1, §15): the `Job Title` field is relabeled `Design Role` and changed from a free-text input to a fixed select, so titles stay consistent across the roster instead of drifting per person who enters one. Every other screen that displays this field (Teams' designer details sheet, People, Projects' team pickers) is unaffected beyond the label change in the Teams sheet.
+- Valid values: `Product Designer`, `Designer`, `UX Designer`, `UI Designer`, `UX Researcher`, `UX Writer`, `Design Lead`, `Design Manager`, `Design Ops`, `Other` — the same set Profile's `design_role` already offers (§6.1) minus `Department Head` (which makes an account a Stakeholder, not a Designer), plus `Designer`/`UX Writer` for titles already in use on the roster. See `docs/DECISIONS.md`.
+
 ## 2026-09-14 — A squad's Squad Lead no longer double-counts as a separate designer
 
 - **Fixed a double-count:** wherever a squad shows its Squad Lead as its own field (Teams → Squad View card, Squad Detail, Master Data → Squads table, Overview's Team Snapshot), the adjacent Designers/Members list and count also included that same person a second time — since the lead's `home_squad_id` normally points at their own squad, they satisfied both the "Squad Lead" lookup and the "member" filter. `docs/PRD.MD` §14.7, §14.8, and §16 now document that these counts/lists exclude the Squad Lead, who's already shown separately. Staffing filters, search-by-designer-name matching, cross-squad support, and Master Data's "Manage members" dialog (which still lists the lead with a `Squad Lead` badge, for lead-reassignment actions) are unchanged — this only affects the summary list/count shown beside the Squad Lead field. See `docs/DECISIONS.md`.

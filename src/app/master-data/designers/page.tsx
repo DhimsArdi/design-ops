@@ -56,7 +56,7 @@ import { useDebouncedValue } from "@/lib/hooks/use-debounced-value"
 import { useCurrentDesignerId } from "@/lib/identity/current-user"
 import { personDisplayName } from "@/lib/identity/person-display"
 import { activeOrSelected, byName } from "@/lib/domain/optionHelpers"
-import { SENIORITIES, type Seniority } from "@/lib/domain/enums"
+import { DESIGNER_JOB_TITLES, SENIORITIES, type DesignerJobTitle, type Seniority } from "@/lib/domain/enums"
 import type { Designer } from "@/lib/domain/types"
 
 // Sentinel for "Unassigned" in the Home Squad select — Base UI Select can't
@@ -67,7 +67,7 @@ const NO_SQUAD_SELECTED = "__none__"
 
 interface DesignerFormState {
   name: string
-  jobTitle: string
+  jobTitle: DesignerJobTitle
   seniority: Seniority
   homeSquadId: string
   avatar: string
@@ -75,12 +75,11 @@ interface DesignerFormState {
 
 interface DesignerFormErrors {
   name?: string
-  jobTitle?: string
 }
 
 const EMPTY_FORM: DesignerFormState = {
   name: "",
-  jobTitle: "",
+  jobTitle: DESIGNER_JOB_TITLES[0],
   seniority: SENIORITIES[0],
   homeSquadId: NO_SQUAD_SELECTED,
   avatar: "",
@@ -163,7 +162,6 @@ export default function DesignersPage() {
 
     const nextErrors: DesignerFormErrors = {}
     if (!form.name.trim()) nextErrors.name = "Name is required."
-    if (!form.jobTitle.trim()) nextErrors.jobTitle = "Job title is required."
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors)
       return
@@ -171,7 +169,7 @@ export default function DesignersPage() {
 
     const payload = {
       name: form.name.trim(),
-      job_title: form.jobTitle.trim(),
+      job_title: form.jobTitle,
       seniority: form.seniority,
       home_squad_id: form.homeSquadId === NO_SQUAD_SELECTED ? null : form.homeSquadId,
       avatar: form.avatar.trim(),
@@ -233,7 +231,7 @@ export default function DesignersPage() {
     },
     {
       key: "job_title",
-      header: "Job Title",
+      header: "Design Role",
       cell: (designer) => <span className="text-muted-foreground">{designer.job_title}</span>,
     },
     {
@@ -416,24 +414,24 @@ export default function DesignersPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="designer-job-title">Job Title *</Label>
-                <Input
-                  id="designer-job-title"
+                <Label htmlFor="designer-job-title">Design Role</Label>
+                <Select
                   value={form.jobTitle}
-                  onChange={(event) => {
-                    const value = event.target.value
-                    setForm((current) => ({ ...current, jobTitle: value }))
-                    setErrors((current) => ({ ...current, jobTitle: undefined }))
-                  }}
-                  placeholder="e.g. Product Designer"
-                  aria-invalid={Boolean(errors.jobTitle)}
-                  aria-describedby={errors.jobTitle ? "designer-job-title-error" : undefined}
-                />
-                {errors.jobTitle ? (
-                  <p id="designer-job-title-error" className="text-xs text-destructive">
-                    {errors.jobTitle}
-                  </p>
-                ) : null}
+                  onValueChange={(value) =>
+                    setForm((current) => ({ ...current, jobTitle: value as DesignerJobTitle }))
+                  }
+                >
+                  <SelectTrigger id="designer-job-title" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DESIGNER_JOB_TITLES.map((jobTitle) => (
+                      <SelectItem key={jobTitle} value={jobTitle}>
+                        {jobTitle}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-1.5">

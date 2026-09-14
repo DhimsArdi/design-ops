@@ -229,7 +229,7 @@ function DesignerDetailsContent({ designerId }: { designerId: string }) {
             <p className="text-sm text-foreground">{designer.seniority}</p>
           </div>
           <div>
-            <p className="text-xs font-medium text-muted-foreground">Job Title</p>
+            <p className="text-xs font-medium text-muted-foreground">Design Role</p>
             <p className="text-sm text-foreground">{designer.job_title}</p>
           </div>
           <div>

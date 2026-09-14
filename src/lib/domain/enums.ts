@@ -60,6 +60,27 @@ export type ProjectPhase = (typeof PROJECT_PHASES)[number];
 export const SENIORITIES = ["Junior", "Mid", "Senior"] as const;
 export type Seniority = (typeof SENIORITIES)[number];
 
+// Designer.job_title — this person's day-to-day discipline/title, shown
+// across every planning screen (Projects, Teams, People pickers). A closed
+// list rather than free text, so titles stay consistent across the roster.
+// Superset of DESIGN_ROLES minus "Department Head" (a Designer can never be a
+// Department Head — that makes the account a Stakeholder instead, see
+// DESIGN_ROLES below and use-profile-identity-form.ts) plus "Designer" and
+// "UX Writer" for titles already in use that aren't a Profile design_role.
+export const DESIGNER_JOB_TITLES = [
+  "Product Designer",
+  "Designer",
+  "UX Designer",
+  "UI Designer",
+  "UX Researcher",
+  "UX Writer",
+  "Design Lead",
+  "Design Manager",
+  "Design Ops",
+  "Other",
+] as const;
+export type DesignerJobTitle = (typeof DESIGNER_JOB_TITLES)[number];
+
 export const STAKEHOLDER_TYPES = [
   "Department Head",
   "Product Owner",

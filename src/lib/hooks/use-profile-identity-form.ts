@@ -15,7 +15,7 @@ import * as profileRepository from "@/lib/repositories/profileRepository"
 import { getDesignerUsage } from "@/lib/selectors/designerSelectors"
 import { getStakeholderUsage } from "@/lib/selectors/stakeholderSelectors"
 import { activeOrSelected, byName } from "@/lib/domain/optionHelpers"
-import { DESIGN_ROLES, type DesignRole } from "@/lib/domain/enums"
+import { DESIGN_ROLES, type DesignerJobTitle, type DesignRole } from "@/lib/domain/enums"
 import type { Department, Designer, Profile, Squad, Stakeholder } from "@/lib/domain/types"
 
 export const NO_DESIGN_ROLE = "__none__"
@@ -214,7 +214,7 @@ export function useProfileIdentityForm({
         finalDesignerId = (
           await designerRepository.createAwaited({
             name: trimmedName,
-            job_title: designRole,
+            job_title: designRole as DesignerJobTitle,
             seniority: "Mid",
             home_squad_id: newDesignerSquadId,
             avatar: "",

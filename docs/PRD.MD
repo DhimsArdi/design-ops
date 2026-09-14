@@ -395,7 +395,7 @@ Example:
 Name:
 Sarah
 
-Job Title:
+Design Role:
 Product Designer
 
 Seniority:
@@ -404,6 +404,8 @@ Junior
 Home Squad:
 Squad A
 ```
+
+`job_title` is labeled **Design Role** in the UI and is a closed select, not free text: `Product Designer`, `Designer`, `UX Designer`, `UI Designer`, `UX Researcher`, `UX Writer`, `Design Lead`, `Design Manager`, `Design Ops`, `Other` (docs/DECISIONS.md). This list is the same set as Profile's `design_role` (§6.1) minus `Department Head` — a Designer can never hold that value, since choosing it turns the account into a Stakeholder instead — plus `Designer` and `UX Writer` for titles already in use on the roster.
 
 `home_squad_id` is optional (§4.3) — a designer can be left **Unassigned**, most often by using `Remove from squad` (§16) or the equivalent action in Teams → Squad View (§14.7).
 
@@ -2030,12 +2032,14 @@ Fields:
 
 ```text
 Name
-Job Title
+Design Role
 Seniority
 Home Squad
 Avatar
 Status
 ```
+
+`Design Role` (`job_title`) is a select, not free text — see §8.1 for the fixed list of values.
 
 Use `Active` / `Inactive` to retire a designer that is still connected to historical projects — an Inactive designer remains visible wherever that history references them (past assignments, People history).
 
