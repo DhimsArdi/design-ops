@@ -1391,10 +1391,14 @@ as a dependency the memo doesn't see.
 
 **Decision:** Add defensive error handling and recovery in `OnboardingView` rather than waiting for a playcaptcha patch (which may take time or never ship in v0.1.0):
 
-- Capture captcha verification errors and display them clearly
-- Provide "Try again" button that resets the captcha component (via key change, triggering re-mount)
-- Wrap form submission in try-catch to surface any parsing errors from the library
+- Wrap `ClawCaptcha` in a custom `CaptchaErrorBoundary` React error boundary to catch rendering/lifecycle errors thrown by the library
+- Capture and surface error messages in `captchaError` state, displayed to user with clear messaging
+- Provide "Try again" button that resets the captcha component (via key change, triggering re-mount of both component and error boundary)
+- Wrap form submission in try-catch to catch errors thrown during onboarding form handling
+- When error occurs, "Back" button text changes to "Try again" and resets the captcha rather than navigating away
 - Keep "Back" button available to return to form if user prefers to skip/retry onboarding flow
+
+Error boundary catches errors during render/lifecycle (e.g., JSON parsing failures inside library); try-catch catches errors during form submission. Together they cover both sync rendering errors and async submission errors.
 
 This is a user-facing workaround, not a permanent fix. **Upgrade path:** if the error persists or becomes frequent, we should either:
 

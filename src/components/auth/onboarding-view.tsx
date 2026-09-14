@@ -24,7 +24,7 @@
 // package README for why the logo path isn't configurable and stays at the
 // public root).
 
-import { useState, type FormEvent } from "react"
+import { useState, type FormEvent, Component } from "react"
 import { ArrowLeft, LogOut } from "lucide-react"
 import { ClawCaptcha } from "playcaptcha"
 import "playcaptcha/clawcaptcha.css"
@@ -45,6 +45,45 @@ import * as profileRepository from "@/lib/repositories/profileRepository"
 import { useProfileIdentityForm } from "@/lib/hooks/use-profile-identity-form"
 import type { Profile } from "@/lib/domain/types"
 import { supabase } from "@/lib/supabase/client"
+
+interface CaptchaErrorBoundaryProps {
+  children: React.ReactNode
+  onError: (error: Error) => void
+}
+
+interface CaptchaErrorBoundaryState {
+  hasError: boolean
+}
+
+class CaptchaErrorBoundary extends Component<
+  CaptchaErrorBoundaryProps,
+  CaptchaErrorBoundaryState
+> {
+  constructor(props: CaptchaErrorBoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: Error) {
+    this.props.onError(error)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Alert variant="destructive">
+          <AlertDescription>Captcha failed to load. Please try again.</AlertDescription>
+        </Alert>
+      )
+    }
+
+    return this.props.children
+  }
+}
 
 /** True once this account still needs the gate below — see the module comment. */
 export function needsOnboarding(profile: Profile | undefined): boolean {
@@ -157,15 +196,24 @@ export function OnboardingView() {
               }}
               className="space-y-8"
             >
-              <ClawCaptcha
-                key={captchaKey}
-                onVerify={() => {
-                  setCaptchaVerified(true)
-                  setCaptchaError(null)
+              <CaptchaErrorBoundary
+                onError={(error) => {
+                  setCaptchaError(
+                    error.message || "Captcha failed to load. Please try again.",
+                  )
+                  setCaptchaVerified(false)
                 }}
-                assetBase="/playcaptcha/toys/"
-                className="mx-auto"
-              />
+              >
+                <ClawCaptcha
+                  key={captchaKey}
+                  onVerify={() => {
+                    setCaptchaVerified(true)
+                    setCaptchaError(null)
+                  }}
+                  assetBase="/playcaptcha/toys/"
+                  className="mx-auto"
+                />
+              </CaptchaErrorBoundary>
 
               <div aria-live="polite">
                 {captchaError && (
